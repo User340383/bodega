@@ -1,0 +1,68 @@
+﻿services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    environment:
+      AI_PROVIDER: mock
+      DATABASE_URL: postgresql://bodega:bodega_local@postgres:5432/bodega
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: sales-images
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin_local_password
+      APP_ACCESS_CODE: local-development-code-123
+      OWNER_ID: 00000000-0000-4000-8000-000000000001
+      OWNER_DISPLAY_NAME: Local Owner
+      APP_TIMEZONE: America/Santo_Domingo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: bodega
+      POSTGRES_USER: bodega
+      POSTGRES_PASSWORD: bodega_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bodega -d bodega"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin_local_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  frontend_node_modules:
+  postgres_data:
+  minio_data:
