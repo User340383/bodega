@@ -1,3 +1,6 @@
-﻿fastapi
+fastapi
 uvicorn[standard]
 python-multipart
+psycopg[binary]>=3.2,<4
+pytest>=8,<10
+httpx>=0.27,<1

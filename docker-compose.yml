@@ -1,14 +1,17 @@
-﻿services:
+services:
   frontend:
     build:
       context: ./frontend
     ports:
       - "5173:5173"
+    environment:
+      BODEGA_API_TARGET: http://backend:8000
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   backend:
     build:
@@ -28,6 +31,12 @@
       OWNER_ID: 00000000-0000-4000-8000-000000000001
       OWNER_DISPLAY_NAME: Local Owner
       APP_TIMEZONE: America/Santo_Domingo
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
     depends_on:
       postgres:
         condition: service_healthy
