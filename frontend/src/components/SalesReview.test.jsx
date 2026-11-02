@@ -108,3 +108,63 @@ describe('Confirmed sales ledger', () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2))
   })
 })
+
+
+describe('Review contract regressions', () => {
+  it.each([undefined, '', ' '])('keeps warnings and blocks a draft with missing/invalid ID %s', async (lineId) => {
+    const { user, request } = review({ lines: [{ ...draft.lines[0], lineId }] })
+    expect(screen.getByRole('alert')).toHaveTextContent('Reopen it before confirming')
+    const verify = screen.getByRole('checkbox', { name: 'Please verify' })
+    await user.click(verify)
+    await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
+    expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeDisabled()
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('blocks duplicate IDs without coupling edits or removing both rows', async () => {
+    const { user, request } = review({ lines: [draft.lines[0], { ...draft.lines[0], itemName: 'Milk' }] })
+    const price = screen.getByRole('textbox', { name: 'Row 1 Unit price' })
+    await user.clear(price)
+    await user.type(price, '2.25')
+    expect(screen.getByRole('textbox', { name: 'Row 2 Unit price' })).toHaveValue('1.50')
+    expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeDisabled()
+    expect(request).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Remove row 2' }))
+    expect(screen.queryByRole('textbox', { name: 'Row 2 Item' })).not.toBeInTheDocument()
+    expect(price).toHaveValue('2.25')
+    expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeEnabled()
+  })
+
+  it('marks added rows as manual while retaining extracted links and verification', async () => {
+    const request = vi.fn().mockResolvedValue({ recordIds: ['a', 'b'], created: true })
+    const { user } = review({}, request)
+    await user.click(screen.getByRole('checkbox', { name: 'Please verify' }))
+    await user.click(screen.getByRole('button', { name: 'Add row' }))
+    await user.type(screen.getByRole('textbox', { name: 'Row 2 Item' }), 'Milk')
+    await user.type(screen.getByRole('textbox', { name: 'Row 2 Quantity' }), '1')
+    await user.type(screen.getByRole('textbox', { name: 'Row 2 Unit price' }), '0')
+    await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
+    const body = JSON.parse(request.mock.calls[0][1].body)
+    expect(body.lines[0]).toMatchObject({ source: 'AI_EXTRACTED', draftLineId: 'a', verifiedFields: ['unitPrice'] })
+    expect(body.lines[1]).toMatchObject({ source: 'MANUAL', draftLineId: null, itemName: 'Milk' })
+  })
+
+  it.each(['0.0000001', '123456789012345678901.1234567', '1e-400'])('sends finite quantity %s and long labels without rounding', async (quantity) => {
+    const request = vi.fn().mockResolvedValue({ recordIds: ['a'], created: true })
+    const label = 'Item ' + 'x'.repeat(210)
+    const { user } = review({ lines: [{
+      ...draft.lines[0], itemName: label, quantity, unitPrice: '0.123456789',
+      bands: { itemName: 'HIGH', quantity: 'HIGH', unitPrice: 'HIGH' },
+    }] }, request)
+    expect(screen.getByRole('textbox', { name: 'Row 1 Item' })).not.toHaveAttribute('maxlength')
+    await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
+    const line = JSON.parse(request.mock.calls[0][1].body).lines[0]
+    expect(line).toMatchObject({ itemName: label, quantity, unitPrice: '0.123456789' })
+  })
+
+  it.each(['NaN', 'Infinity', '-0.0000001', '0e100'])('blocks invalid quantity %s', (quantity) => {
+    review({ lines: [{ ...draft.lines[0], quantity, bands: { itemName: 'HIGH', quantity: 'HIGH', unitPrice: 'HIGH' } }] })
+    expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Row 1 Quantity' })).toHaveAttribute('aria-invalid', 'true')
+  })
+})

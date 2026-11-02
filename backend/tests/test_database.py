@@ -64,7 +64,7 @@ def counts(sid):
 def test_migration_is_repeatable_and_relationships(db):
     migrate()
     with connect() as conn:
-        assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 2
+        assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 3
         assert conn.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('owners','submissions','sales_records','baseline_estimates')").fetchone()[0] == 4
     with pytest.raises(psycopg.errors.ForeignKeyViolation), connect() as conn:
         conn.execute('INSERT INTO submissions(id,owner_id,sale_date) VALUES (%s,%s,%s)', (uuid4(), uuid4(), date.today()))
@@ -88,7 +88,7 @@ def test_confirm_and_repeat_and_history(client):
     assert client.get('/api/v1/submissions/' + str(sid)).json()['lines'] == []
 
 
-@pytest.mark.parametrize('changes', [{'itemName': '  '}, {'quantity': '0'}, {'quantity': '-1'}, {'quantity': 'NaN'}, {'quantity': 'Infinity'}, {'unitPrice': '-0.01'}, {'unitPrice': 'NaN'}, {'quantity': '0.0000001'}])
+@pytest.mark.parametrize('changes', [{'itemName': '  '}, {'quantity': '0'}, {'quantity': '-1'}, {'quantity': 'NaN'}, {'quantity': 'Infinity'}, {'unitPrice': '-0.01'}, {'unitPrice': 'NaN'}, {'unitPrice': 'Infinity'}])
 def test_invalid_values_leave_draft_unchanged(client, changes):
     sid = make_submission()
     assert client.post('/api/v1/confirm', json=body(sid, **changes)).status_code == 422
@@ -120,7 +120,7 @@ def test_database_failure_rolls_back_rows_and_status(client):
 
 def test_partial_insert_rolls_back_on_later_verification_failure(client):
     sid = make_submission(payload={'lines': [{'lineId': 'a', 'itemName': 'Milk', 'quantity': 2, 'unitPrice': 1, 'bands': {'itemName': 'HIGH', 'quantity': 'HIGH', 'unitPrice': 'MEDIUM'}}]})
-    request = body(sid)
+    request = body(sid, source='MANUAL')
     request['lines'].append({'draftLineId': 'a', 'itemName': 'Milk', 'quantity': 2, 'unitPrice': 1})
     assert client.post('/api/v1/confirm', json=request).status_code == 422
     assert counts(sid) == ('NEEDS_VERIFICATION', 0)
@@ -247,3 +247,204 @@ def test_database_rejects_whitespace_only_labels(client):
         with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
             conn.execute("INSERT INTO baseline_estimates(id,owner_id,item_name,window_days,logged_days,average_daily_quantity,trend,suggested_restock_qty) VALUES (%s,%s,%s,7,7,1,'STABLE',7)", (uuid4(), repository.owner_id(), item))
     assert counts(sid) == ('CONFIRMED', 1)
+
+
+def uncertain_line(**overrides):
+    line = {'lineId': 'a', 'itemName': 'Bread', 'quantity': '2.5', 'unitPrice': '1.20',
+            'bands': {'itemName': 'HIGH', 'quantity': 'HIGH', 'unitPrice': 'MEDIUM'}}
+    line.update(overrides)
+    return line
+
+
+@pytest.mark.parametrize('changes', [{}, {'draftLineId': None}, {'draftLineId': ''},
+                                     {'draftLineId': ' '}, {'source': 'AI_EXTRACTED'}])
+def test_extracted_row_cannot_bypass_review_by_omitting_link(client, changes):
+    sid = make_submission(payload={'lines': [uncertain_line()]})
+    response = client.post('/api/v1/confirm', json=body(sid, **changes))
+    assert response.status_code == 422, response.text
+    assert counts(sid) == ('NEEDS_VERIFICATION', 0)
+    assert client.get('/api/v1/submissions/' + str(sid)).json()['lines'][0]['unitPrice'] == '1.20'
+
+
+@pytest.mark.parametrize('correction', [{'verifiedFields': ['unitPrice']}, {'unitPrice': '1.25'}])
+def test_verified_or_corrected_extracted_rows_keep_provenance(client, correction):
+    sid = make_submission(payload={'lines': [uncertain_line()]})
+    request = body(sid, draftLineId='a', **correction)
+    first = client.post('/api/v1/confirm', json=request)
+    assert first.status_code == 201, first.text
+    repeat = client.post('/api/v1/confirm', json=request)
+    assert repeat.status_code == 200
+    assert repeat.json()['recordIds'] == first.json()['recordIds']
+    assert client.get('/api/v1/sales').json()['records'][0]['source'] == 'AI_EXTRACTED'
+
+
+def test_explicit_manual_row_beside_extraction_and_inconsistent_sources(client):
+    sid = make_submission(payload={'lines': [uncertain_line()]})
+    for overrides in ({'draftLineId': 'a', 'source': 'MANUAL', 'verifiedFields': ['unitPrice']},
+                      {'source': 'UNKNOWN'}, {'source': 'AI_EXTRACTED'}):
+        response = client.post('/api/v1/confirm', json=body(sid, **overrides))
+        assert response.status_code == 422
+        assert counts(sid) == ('NEEDS_VERIFICATION', 0)
+    request = body(sid, draftLineId='a', verifiedFields=['unitPrice'])
+    request['lines'].append(body(sid, itemName='Milk', source='MANUAL')['lines'][0])
+    assert client.post('/api/v1/confirm', json=request).status_code == 201
+    records = client.get('/api/v1/sales').json()['records']
+    assert [(r['itemName'], r['source']) for r in records] == [('Bread', 'AI_EXTRACTED'), ('Milk', 'MANUAL')]
+
+
+def test_unknown_and_duplicate_confirmation_links_roll_back(client):
+    sid = make_submission(payload={'lines': [uncertain_line()]})
+    request = body(sid, draftLineId='a', verifiedFields=['unitPrice'])
+    for invalid_id in ('missing', 'a'):
+        request['lines'] = [request['lines'][0],
+                            body(sid, draftLineId=invalid_id, verifiedFields=['unitPrice'])['lines'][0]]
+        response = client.post('/api/v1/confirm', json=request)
+        assert response.status_code == 422
+        assert counts(sid) == ('NEEDS_VERIFICATION', 0)
+
+
+def test_legacy_draft_without_ids_reopens_and_confirms_without_500(client):
+    from psycopg.types.json import Jsonb
+    sid = make_submission()
+    # Bypass the new write boundary to model a draft persisted by an older caller.
+    legacy = uncertain_line()
+    legacy.pop('lineId')
+    with connect() as conn:
+        conn.execute('UPDATE submissions SET draft_payload=%s WHERE id=%s',
+                     (Jsonb({'lines': [legacy, uncertain_line(lineId='preserved')]}), sid))
+    url = '/api/v1/submissions/' + str(sid)
+    first = client.get(url)
+    assert first.status_code == 200, first.text
+    lines = first.json()['lines']
+    assert lines == client.get(url).json()['lines']
+    assert lines[0]['lineId'] and lines[0]['lineId'] != 'preserved'
+    assert lines[1]['lineId'] == 'preserved'
+    assert client.post('/api/v1/confirm', json=body(sid)).status_code == 422
+    request = body(sid, draftLineId=lines[0]['lineId'])
+    assert client.post('/api/v1/confirm', json=request).status_code == 422
+    assert counts(sid) == ('NEEDS_VERIFICATION', 0)
+    request['lines'][0]['verifiedFields'] = ['unitPrice']
+    assert client.post('/api/v1/confirm', json=request).status_code == 201
+    assert client.get('/api/v1/sales').json()['records'][0]['source'] == 'AI_EXTRACTED'
+
+
+def test_ids_are_persisted_on_create_and_update_and_missing_bands_require_review(client):
+    sid = make_submission('UPLOADED', {'lines': [uncertain_line(lineId=None, bands=None)]})
+    with connect() as conn:
+        payload = conn.execute('SELECT draft_payload FROM submissions WHERE id=%s', (sid,)).fetchone()[0]
+    line_id = payload['lines'][0]['lineId']
+    assert payload['lines'][0]['bands'] == {}
+    repository.update_status(sid, 'CLASSIFYING')
+    repository.update_status(sid, 'NEEDS_VERIFICATION', draft_payload={'lines': [uncertain_line(lineId=None, bands=None)]})
+    assert client.get('/api/v1/submissions/' + str(sid)).json()['lines'][0]['lineId'] == line_id
+    request = body(sid, draftLineId=line_id)
+    assert client.post('/api/v1/confirm', json=request).status_code == 422
+    request['lines'][0]['verifiedFields'] = ['itemName', 'quantity', 'unitPrice']
+    assert client.post('/api/v1/confirm', json=request).status_code == 201
+
+
+@pytest.mark.parametrize('payload', [
+    {'lines': [uncertain_line(), uncertain_line()]},
+    {'lines': [uncertain_line(lineId='')]},
+    {'lines': [uncertain_line(lineId=123)]},
+    {'lines': [None]},
+    {'lines': [uncertain_line(bands=[])]},
+    {'lines': {}},
+])
+def test_malformed_draft_is_rejected_without_partial_write_or_unhandled_500(client, payload):
+    from fastapi import HTTPException
+    from psycopg.types.json import Jsonb
+    sid = make_submission('CLASSIFYING')
+    with pytest.raises(HTTPException) as exc:
+        repository.update_status(sid, 'NEEDS_VERIFICATION', draft_payload=payload)
+    assert exc.value.status_code == 422
+    assert counts(sid) == ('CLASSIFYING', 0)
+    with pytest.raises(HTTPException):
+        repository.create_submission(date.today(), draft_payload=payload)
+    with connect() as conn:
+        assert conn.execute('SELECT count(*) FROM submissions').fetchone()[0] == 1
+        conn.execute("UPDATE submissions SET status='NEEDS_VERIFICATION', draft_payload=%s WHERE id=%s", (Jsonb(payload), sid))
+    assert client.get('/api/v1/submissions/' + str(sid)).status_code == 422
+    assert client.post('/api/v1/confirm', json=body(sid, source='MANUAL')).status_code == 422
+    assert counts(sid) == ('NEEDS_VERIFICATION', 0)
+
+
+@pytest.mark.parametrize('quantity', ['0.0000001', '123456789012345678901.1234567', '1e-400'])
+def test_finite_values_and_labels_are_not_restricted_by_unapproved_caps(client, quantity):
+    from decimal import Decimal
+    sid = make_submission('AI_UNAVAILABLE')
+    label = 'Item ' + 'x' * 210
+    response = client.post('/api/v1/confirm', json=body(sid, itemName=label, quantity=quantity, unitPrice='0.123456789'))
+    assert response.status_code == 201, response.text
+    row = client.get('/api/v1/sales').json()['records'][0]
+    assert row['itemName'] == label
+    assert Decimal(row['quantity']) == Decimal(quantity)
+    assert row['unitPrice'] == '0.123456789'
+    assert row['source'] == 'MANUAL'
+
+
+@pytest.mark.parametrize('data,files,field', [
+    ({'saleDate': 'not-a-date', 'text': 'Bread 3'}, None, 'saleDate'),
+    ({'text': 'Bread 3'}, None, 'saleDate'),
+    ({'saleDate': (date.today() + timedelta(days=1)).isoformat(), 'text': 'Bread 3'}, None, 'saleDate'),
+    ({'saleDate': date.today().isoformat(), 'text': '   '}, None, 'text'),
+    ({'saleDate': date.today().isoformat()}, None, None),
+    ({'saleDate': date.today().isoformat()}, {'file': ('data.txt', b'x', 'text/plain')}, 'file'),
+    ({'saleDate': date.today().isoformat(), 'text': 'Bread'}, {'file': ('data.png', b'x', 'image/png')}, None),
+])
+def test_extraction_validation_returns_400_with_field_details_and_no_submission(client, data, files, field):
+    response = client.post('/api/v1/extract', data=data, files=files)
+    assert response.status_code == 400, response.text
+    errors = response.json()['detail']
+    assert isinstance(errors, list) and errors
+    assert errors[0]['loc'] == (['body', field] if field else ['body'])
+    assert errors[0]['msg'] and errors[0]['type']
+    assert all(set(error) == {'loc', 'msg', 'type'} for error in errors)
+    with connect() as conn:
+        assert conn.execute('SELECT count(*) FROM submissions').fetchone()[0] == 0
+
+
+def test_validation_status_change_is_scoped_to_extraction_and_documented(client):
+    assert client.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []}).status_code == 422
+    assert client.post('/api/v1/guidance', json={'asOf': 'bad'}).status_code == 422
+    assert client.get('/api/v1/sales?limit=0').status_code == 422
+    responses = client.get('/openapi.json').json()['paths']['/api/v1/extract']['post']['responses']
+    assert '400' in responses and '422' not in responses
+
+
+def test_migration_upgrade_preserves_existing_records_and_nonblank_checks(db, monkeypatch):
+    from pathlib import Path
+    schema = 'test_upgrade_' + uuid4().hex
+    url = os.environ['TEST_DATABASE_URL']
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
+    monkeypatch.setenv('BODEGA_DB_SCHEMA', schema)
+    try:
+        with connect() as conn:
+            conn.execute('CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())')
+            for name in ('001_data_state.sql', '002_nonblank_labels.sql'):
+                conn.execute((Path(__file__).resolve().parents[1] / 'migrations' / name).read_text())
+                conn.execute('INSERT INTO schema_migrations(version) VALUES (%s)', (name,))
+        from app.main import ConfirmRequest
+        sid = make_submission()
+        original_ids, _ = repository.save_sales_records(ConfirmRequest(**body(sid)))
+        baseline_id = uuid4()
+        with connect() as conn:
+            conn.execute("INSERT INTO baseline_estimates VALUES (%s,%s,'Bread',7,7,2.5,'STABLE',18,now())",
+                         (baseline_id, repository.owner_id()))
+        migrate()
+        migrate()
+        with connect() as conn:
+            assert conn.execute('SELECT id FROM sales_records WHERE submission_id=%s', (sid,)).fetchone()[0] == original_ids[0]
+            assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 3
+            conn.execute('UPDATE baseline_estimates SET item_name=%s WHERE id=%s', ('x' * 201, baseline_id))
+        assert counts(sid) == ('CONFIRMED', 1)
+        other = make_submission()
+        repository.save_sales_records(ConfirmRequest(**body(other, itemName='x' * 201)))
+        for label in ('', ' ', '\t\n'):
+            with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
+                conn.execute('UPDATE baseline_estimates SET item_name=%s WHERE id=%s', (label, baseline_id))
+        assert counts(other) == ('CONFIRMED', 1)
+    finally:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))

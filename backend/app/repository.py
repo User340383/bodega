@@ -2,7 +2,7 @@
 import os
 from datetime import date
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from fastapi import HTTPException
 from psycopg.rows import dict_row
@@ -14,9 +14,42 @@ def owner_id():
     return UUID(os.environ["OWNER_ID"])
 
 
+def _normalize_draft(submission_id, payload):
+    """Preserve supplied IDs; give legacy/missing IDs stable submission-scoped values."""
+    if payload is None:
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get('lines', []), list):
+        raise HTTPException(422, "Draft lines must be a list")
+    used = set()
+    for line in payload.get('lines', []):
+        if not isinstance(line, dict):
+            raise HTTPException(422, "Each draft row must be an object")
+        line_id = line.get('lineId')
+        if line_id is not None:
+            if not isinstance(line_id, str) or not line_id.strip() or line_id in used:
+                raise HTTPException(422, "Draft line IDs must be nonblank, unique strings")
+            used.add(line_id)
+        if line.get('bands') is not None and not isinstance(line['bands'], dict):
+            raise HTTPException(422, "Draft confidence bands must be an object")
+    lines = []
+    for index, line in enumerate(payload.get('lines', [])):
+        line_id = line.get('lineId')
+        if line_id is None:
+            attempt = 0
+            while True:
+                line_id = str(uuid5(UUID(str(submission_id)), f'draft-line:{index}:{attempt}'))
+                if line_id not in used:
+                    break
+                attempt += 1
+            used.add(line_id)
+        lines.append({**line, 'lineId': line_id, 'bands': line.get('bands') or {}})
+    return {**payload, 'lines': lines}
+
+
 def create_submission(sale_date, *, image_key=None, draft_payload=None):
     from psycopg.types.json import Jsonb
     submission_id = uuid4()
+    draft_payload = _normalize_draft(submission_id, draft_payload)
     with connect() as conn:
         conn.execute("INSERT INTO owners(id) VALUES (%s) ON CONFLICT DO NOTHING", (owner_id(),))
         conn.execute("INSERT INTO submissions(id,owner_id,sale_date,image_key,draft_payload) VALUES (%s,%s,%s,%s,%s)",
@@ -26,6 +59,7 @@ def create_submission(sale_date, *, image_key=None, draft_payload=None):
 
 def update_status(submission_id, status, *, draft_payload=None):
     from psycopg.types.json import Jsonb
+    draft_payload = _normalize_draft(submission_id, draft_payload)
     with connect() as conn:
         result = conn.execute("UPDATE submissions SET status=%s, draft_payload=COALESCE(%s,draft_payload) WHERE id=%s AND owner_id=%s",
                               (status, Jsonb(draft_payload) if draft_payload is not None else None, submission_id, owner_id()))
@@ -39,8 +73,9 @@ def get_submission(submission_id):
         row = conn.execute("SELECT id, sale_date, status, draft_payload FROM submissions WHERE id=%s AND owner_id=%s", (submission_id, owner_id())).fetchone()
         if row is None:
             raise HTTPException(404, "Submission not found")
+        draft = _normalize_draft(row["id"], row["draft_payload"])
         return {"submissionId": row["id"], "saleDate": row["sale_date"], "status": row["status"],
-                "lines": (row["draft_payload"] or {}).get("lines", []), "manualEntry": row["status"] in ('AI_UNAVAILABLE', 'REJECTED')}
+                "lines": (draft or {}).get("lines", []), "manualEntry": row["status"] in ('AI_UNAVAILABLE', 'REJECTED')}
 
 
 def _same_value(left, right, field):
@@ -65,23 +100,28 @@ def save_sales_records(request):
             raise HTTPException(409, "Submission is not ready for confirmation; rejected submissions must enter manual review first")
         if submission['sale_date'] > date.today():
             raise HTTPException(422, "Sale date cannot be in the future")
-        drafts = {str(line['lineId']): line for line in (submission['draft_payload'] or {}).get('lines', [])}
+        payload = _normalize_draft(submission['id'], submission['draft_payload'])
+        drafts = {line['lineId']: line for line in (payload or {}).get('lines', [])}
         ids, seen = [], set()
         for index, line in enumerate(request.lines):
             draft = None
-            if line.draftLineId:
+            if line.draftLineId is not None:
                 if line.draftLineId in seen or line.draftLineId not in drafts:
                     raise HTTPException(422, f"Row {index + 1}: unknown or duplicate draftLineId")
+                if line.source == 'MANUAL':
+                    raise HTTPException(422, f"Row {index + 1}: a linked draft row cannot have MANUAL source")
                 seen.add(line.draftLineId)
                 draft = drafts[line.draftLineId]
-            if draft:
+            elif line.source == 'AI_EXTRACTED' or (drafts and line.source != 'MANUAL'):
+                raise HTTPException(422, f"Row {index + 1}: link the draft row or explicitly declare a new MANUAL row")
+            if draft is not None:
                 for field in ('itemName', 'quantity', 'unitPrice'):
                     band = draft.get('bands', {}).get(field, 'UNSCORED')
                     if band != 'HIGH' and _same_value(draft.get(field), getattr(line, field), field) and field not in line.verifiedFields:
                         raise HTTPException(422, f"Row {index + 1}: verify or edit {field}")
             record_id = uuid4()
             conn.execute("INSERT INTO sales_records(id,submission_id,line_number,item_name,quantity,unit_price,sale_date,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                         (record_id, request.submissionId, index, line.itemName, line.quantity, line.unitPrice, submission['sale_date'], 'AI_EXTRACTED' if draft else 'MANUAL'))
+                         (record_id, request.submissionId, index, line.itemName, line.quantity, line.unitPrice, submission['sale_date'], 'AI_EXTRACTED' if draft is not None else 'MANUAL'))
             ids.append(record_id)
         conn.execute("UPDATE submissions SET status='CONFIRMED', draft_payload=NULL WHERE id=%s", (request.submissionId,))
     return ids, True

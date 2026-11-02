@@ -15,6 +15,10 @@ with httpx.Client(base_url=os.environ['API_URL'], headers={'Authorization': 'Bea
             if attempt == 59:
                 raise
             time.sleep(0.5)
+    invalid = client.post('/api/v1/extract', data={'saleDate': 'not-a-date', 'text': 'Bread 3'})
+    assert invalid.status_code == 400, invalid.text
+    assert invalid.json()['detail'][0]['loc'] == ['body', 'saleDate']
+    assert client.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []}).status_code == 422
     draft = client.post('/api/v1/extract', data={'saleDate': date.today().isoformat(), 'text': 'Bread 3'}).raise_for_status().json()
     assert draft['status'] == 'AI_UNAVAILABLE'
     sid = draft['submissionId']
@@ -29,4 +33,4 @@ with httpx.Client(base_url=os.environ['API_URL'], headers={'Authorization': 'Bea
     assert len(rows) == 1 and rows[0]['quantity'] == '2.5' and rows[0]['unitPrice'] == '1.20'
     assert client.get('/api/v1/submissions/' + sid).json()['status'] == 'CONFIRMED'
     assert client.get('/api/v1/sales', headers={'Authorization': 'Bearer invalid'}).status_code == 401
-print('PASS: frontend HTML, proxy, persistent draft, confirmation, idempotency, exact-decimal ledger, authentication')
+print('PASS: frontend HTML, proxy, persistent draft, confirmation, idempotency, exact-decimal ledger, authentication, extraction 400 and confirmation 422')

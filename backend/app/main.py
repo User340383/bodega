@@ -3,6 +3,7 @@ import os
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
+from typing import Literal
 
 from fastapi import (
     Depends,
@@ -16,6 +17,9 @@ from fastapi import (
     Query,
     Response,
 )
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from contextlib import asynccontextmanager
 import logging
@@ -34,9 +38,24 @@ app = FastAPI(title="Bodega API", version="0.1.0", lifespan=lifespan)
 
 @app.exception_handler(psycopg.Error)
 async def database_error(request, exc):
-    from fastapi.responses import JSONResponse
     logging.getLogger(__name__).error("Database operation failed (%s)", type(exc).__name__)
     return JSONResponse(status_code=500, content={"detail": "Sales could not be saved or loaded. Your draft is unchanged; please try again."})
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(request, exc):
+    if request.method == "POST" and request.url.path == "/api/v1/extract":
+        # Do not echo raw input or validation context into the response.
+        details = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
+        return JSONResponse(status_code=400, content={"detail": details})
+    return await request_validation_exception_handler(request, exc)
+
+
+def extraction_validation_error(field, message):
+    return HTTPException(400, detail=[{
+        "loc": ["body", field] if field else ["body"],
+        "msg": message, "type": "value_error",
+    }])
 
 
 def require_owner_access(
@@ -61,10 +80,11 @@ class ConfidenceBands(BaseModel):
 
 
 class ConfirmLine(BaseModel):
-    draftLineId: str | None = None
-    itemName: str = Field(min_length=1, max_length=200)
-    quantity: Decimal = Field(gt=0, allow_inf_nan=False, max_digits=20, decimal_places=6)
-    unitPrice: Decimal = Field(ge=0, allow_inf_nan=False, max_digits=20, decimal_places=6)
+    draftLineId: str | None = Field(default=None, min_length=1)
+    source: Literal["AI_EXTRACTED", "MANUAL"] | None = None
+    itemName: str = Field(min_length=1)
+    quantity: Decimal = Field(gt=0, allow_inf_nan=False)
+    unitPrice: Decimal = Field(ge=0, allow_inf_nan=False)
     verifiedFields: list[str] = Field(default_factory=list)
 
     @field_validator("itemName")
@@ -113,7 +133,10 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/api/v1/extract")
+@app.post("/api/v1/extract", responses={
+    400: {"description": "Invalid extraction input, including missing or malformed form fields"},
+    "4XX": {"description": "Input or access error"},
+})
 async def extract(
     saleDate: date = Form(...),
     file: UploadFile | None = File(default=None),
@@ -121,39 +144,21 @@ async def extract(
     _: None = Depends(require_owner_access),
 ):
     if (file is None) == (text is None):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "VALIDATION_ERROR",
-                    "message": "Provide exactly one image file or text input.",
-                    "fields": {},
-                }
-            },
-        )
+        raise extraction_validation_error(None, "Provide exactly one image file or text input.")
 
     if file is not None:
         if file.content_type not in ("image/jpeg", "image/png"):
-            raise HTTPException(
-                status_code=400,
-                detail="Only JPEG and PNG images are accepted.",
-            )
+            raise extraction_validation_error("file", "Only JPEG and PNG images are accepted.")
 
         contents = await file.read(10 * 1024 * 1024 + 1)
         if len(contents) > 10 * 1024 * 1024:
-            raise HTTPException(
-                status_code=400,
-                detail="Image must not exceed 10 MiB.",
-            )
+            raise extraction_validation_error("file", "Image must not exceed 10 MiB.")
 
     elif not text or not text.strip() or len(text) > 5000:
-        raise HTTPException(
-            status_code=400,
-            detail="Text must contain 1-5,000 characters.",
-        )
+        raise extraction_validation_error("text", "Text must contain 1-5,000 characters.")
 
     if saleDate > date.today():
-        raise HTTPException(400, "Sale date cannot be in the future")
+        raise extraction_validation_error("saleDate", "Sale date cannot be in the future")
     # Integration boundary only: no AI extraction, raw-input storage or fabricated rows.
     submission_id = repository.create_submission(saleDate)
     repository.update_status(submission_id, "CLASSIFYING")

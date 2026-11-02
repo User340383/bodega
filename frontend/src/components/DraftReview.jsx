@@ -2,21 +2,23 @@ import { useState } from 'react'
 
 const fields = ['itemName', 'quantity', 'unitPrice']
 const labels = { itemName: 'Item', quantity: 'Quantity', unitPrice: 'Unit price' }
-const numeric = /^[+]?(?:\d+(?:\.\d{0,6})?|\.\d{1,6})$/
+const numeric = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 
 function fieldError(row, field) {
   const value = row[field].trim()
   if (!value) return `${labels[field]} is required.`
-  if (field === 'itemName') return value.length > 200 ? 'Use at most 200 characters.' : ''
-  if (!numeric.test(value) || !Number.isFinite(Number(value))) return 'Enter a number with at most 6 decimal places.'
-  if (Number(value) < 0 || (field === 'quantity' && Number(value) === 0)) return field === 'quantity' ? 'Quantity must be greater than zero.' : 'Price cannot be negative.'
-  if (value.replace(/^\+/, '').split('.')[0].replace(/^0+/, '').length > 14) return 'Use at most 14 digits before the decimal point.'
+  if (field === 'itemName') return ''
+  if (!numeric.test(value)) return 'Enter a finite number.'
+  // Check sign and zero without rounding or underflow through JavaScript Number.
+  const mantissa = value.split(/[eE]/)[0]
+  const nonzero = /[1-9]/.test(mantissa)
+  if ((mantissa.startsWith('-') && nonzero) || (field === 'quantity' && !nonzero)) return field === 'quantity' ? 'Quantity must be greater than zero.' : 'Price cannot be negative.'
   return ''
 }
 
 function reviewRows(draft) {
-  return (draft.lines || []).map(line => ({
-    ...line, key: line.lineId, verifiedFields: [],
+  return (draft.lines || []).map((line, index) => ({
+    ...line, key: `draft-${index}`, extracted: true, verifiedFields: [],
     ...Object.fromEntries(fields.map(field => [field, line.bands?.[field] === 'LOW' ? '' : String(line[field] ?? '')])),
   }))
 }
@@ -28,8 +30,11 @@ export default function DraftReview({ draft, request, onConfirmed }) {
   const [result, setResult] = useState(null)
   const [status, setStatus] = useState(draft.status)
   const editable = ['NEEDS_VERIFICATION', 'AI_UNAVAILABLE'].includes(status)
-  const invalid = rows.length === 0 || rows.length > 100 || rows.some(row => fields.some(field =>
-    fieldError(row, field) || (row.bands?.[field] !== 'HIGH' && row.lineId && !row.verifiedFields.includes(field)),
+  const extractedRows = rows.filter(row => row.extracted)
+  const missingLink = extractedRows.some(row => typeof row.lineId !== 'string' || !row.lineId.trim()) ||
+    new Set(extractedRows.map(row => row.lineId)).size !== extractedRows.length
+  const invalid = missingLink || rows.length === 0 || rows.length > 100 || rows.some(row => fields.some(field =>
+    fieldError(row, field) || (row.extracted && row.bands?.[field] !== 'HIGH' && !row.verifiedFields.includes(field)),
   ))
 
   function change(key, field, value) {
@@ -47,7 +52,8 @@ export default function DraftReview({ draft, request, onConfirmed }) {
       const response = await request('/api/v1/confirm', {
         method: 'POST',
         body: JSON.stringify({ submissionId: draft.submissionId, lines: rows.map(row => ({
-          draftLineId: row.lineId || null, itemName: row.itemName.trim(),
+          draftLineId: row.extracted ? row.lineId : null, source: row.extracted ? 'AI_EXTRACTED' : 'MANUAL',
+          itemName: row.itemName.trim(),
           quantity: row.quantity, unitPrice: row.unitPrice, verifiedFields: row.verifiedFields,
         })) }),
       })
@@ -72,19 +78,20 @@ export default function DraftReview({ draft, request, onConfirmed }) {
       finally { setBusy(false) }
     }}>Review manually</button>}
     {!editable && <p role="status">This submission is not awaiting confirmation.</p>}
+    {missingLink && <p role="alert">This draft could not be loaded completely. Reopen it before confirming.</p>}
     <form onSubmit={confirm}>
       <fieldset disabled={busy || !!result || !editable}>
         <div className="table-scroll"><table>
           <thead><tr>{fields.map(field => <th key={field}>{labels[field]}</th>)}<th>Actions</th></tr></thead>
           <tbody>{rows.map((row, index) => <tr key={row.key}>
             {fields.map(field => {
-              const uncertain = row.lineId && row.bands?.[field] !== 'HIGH'
+              const uncertain = row.extracted && row.bands?.[field] !== 'HIGH'
               const validation = fieldError(row, field)
               const errorId = `row-${index}-${field}-error`
               return <td key={field} className={uncertain ? 'verify' : ''}>
                 <label>
                   <span className="sr-only">Row {index + 1} {labels[field]}</span>
-                  <input required maxLength={field === 'itemName' ? 200 : undefined}
+                  <input required
                     aria-invalid={!!validation} aria-describedby={validation ? errorId : undefined}
                     inputMode={field === 'itemName' ? 'text' : 'decimal'} value={row[field]}
                     onChange={event => change(row.key, field, event.target.value)} />
@@ -102,9 +109,9 @@ export default function DraftReview({ draft, request, onConfirmed }) {
           </tr>)}</tbody>
         </table></div>
         <button type="button" disabled={rows.length >= 100} onClick={() => setRows([...rows, {
-          key: crypto.randomUUID(), itemName: '', quantity: '', unitPrice: '', verifiedFields: [],
+          key: crypto.randomUUID(), extracted: false, itemName: '', quantity: '', unitPrice: '', verifiedFields: [],
         }])}>Add row</button>
-        <p>Use a nonblank item, a positive quantity and a nonnegative unit price. Use at most 14 integer digits and 6 decimal places.</p>
+        <p>Use a nonblank item, a finite positive quantity and a finite nonnegative unit price.</p>
         {invalid && <p role="status">Complete all fields and verify highlighted values. Between 1 and 100 valid rows are required.</p>}
         <button type="submit" disabled={invalid}>{busy ? 'Saving...' : 'Confirm sales'}</button>
       </fieldset>
