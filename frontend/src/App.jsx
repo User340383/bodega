@@ -1,122 +1,56 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useCallback, useState } from 'react'
+import DraftReview from './components/DraftReview'
+import SalesHistory from './components/SalesHistory'
 import './App.css'
 
+// Minimal mount point until Luis supplies the shared shell/client and José the capture UI.
 function App() {
-  const [count, setCount] = useState(0)
+  const [code, setCode] = useState('')
+  const [accessCode, setAccessCode] = useState('')
+  const [submissionId, setSubmissionId] = useState('')
+  const [draft, setDraft] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [revision, setRevision] = useState(0)
+  const [draftVersion, setDraftVersion] = useState(0)
+  const request = useCallback(async (path, options = {}) => {
+    const response = await fetch(path, { ...options, headers: {
+      Authorization: `Bearer ${accessCode}`, 'Content-Type': 'application/json', ...options.headers,
+    } })
+    const result = await response.json()
+    if (!response.ok) {
+      const detail = result.detail
+      throw new Error(typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(value => `${value.loc.join('.')}: ${value.msg}`).join('; ') : 'Request failed. Please try again.')
+    }
+    return result
+  }, [accessCode])
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
+  async function openDraft(event) {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+    try { setDraft(await request(`/api/v1/submissions/${encodeURIComponent(submissionId.trim())}`)) }
+    catch (err) { setError(err.message) }
+    finally { setLoading(false); setDraftVersion(value => value + 1) }
+  }
+
+  return <main>
+    <header><h1>Bodega</h1><p>Review sales and browse confirmed history.</p></header>
+    <form onSubmit={event => { event.preventDefault(); setDraft(null); setAccessCode(code); setRevision(revision + 1) }}>
+      <label>Owner access code <input type="password" required value={code} onChange={event => setCode(event.target.value)} /></label>
+      <button>Connect</button>
+    </form>
+    {accessCode && <>
+      <section><h2>Open a submission</h2>
+        <p>Enter a submission ID to review previously captured sales. Sales capture is being integrated.</p>
+        <form onSubmit={openDraft}><label>Submission ID <input required value={submissionId} onChange={event => setSubmissionId(event.target.value)} /></label>
+          <button disabled={loading}>{loading ? 'Loading…' : 'Open draft'}</button>
+        </form>
+        {error && <p role="alert">{error}</p>}
       </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {draft && <DraftReview key={`${draft.submissionId}:${draftVersion}`} draft={draft} request={request} onConfirmed={() => setRevision(revision + 1)} />}
+      <SalesHistory key={`${accessCode}:${revision}`} request={request} revision={revision} />
+    </>}
+  </main>
 }
-
 export default App
