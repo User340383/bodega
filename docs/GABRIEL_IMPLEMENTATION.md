@@ -1,5 +1,91 @@
 # Gabriel Marte: implementation report
 
+## Current Milestone 4 update (branch `gabriel/milestone4-api-contract`)
+
+PR #1 is merged into `main` at `94d304f24d7801bfcc0839622e6bb426c31a220b`. This branch was created from that fetched main commit. The older sections below document the Milestone 3 implementation and review history; where they describe PR #1 as open or tests as pending, those statements are historical rather than current.
+
+### Contract decisions and current behavior
+
+- **Validation errors:** Milestone 3 states that invalid extraction input returns HTTP 400 and the recovery table calls for field-level errors, but it does not define a universal envelope. Request validation now uses `{"detail":[{"loc": [...], "msg": "...", "type": "..."}]}` for every route; extracted inputs retain HTTP 400, while other request validation remains HTTP 422. The response omits submitted values. Existing business/authentication errors keep their prior `detail` forms and status codes for compatibility. Team agreement is still needed before treating this as a universal API error contract.
+- **Sales history dates:** `GET /api/v1/sales` accepts optional inclusive `startDate` and `endDate` (ISO dates). Omitting either bound leaves that side unbounded; omitting both returns history across all dates, subject to the existing pagination. The endpoint keeps `limit=100`, maximum `limit=100`, and `offset=0`. Milestone 3's 28-day window belongs to the proposed analysis query, not the owner-facing sales-history endpoint, so it is not applied here. No sales-history date maximum or default range is specified in Milestone 3. Reversed bounds return HTTP 422 with the standard field-detail shape.
+- **Confirmation:** The design method notation says `confirm(submissionId, records)` and returns saved IDs; the sequence specifies `POST /api/v1/confirm`, first success 201, and repeat confirmation returns existing IDs without duplication. Since the document does not settle the JSON property name or envelope, the implemented `submissionId` + `lines` request and `{submissionId, recordIds, created}` response stay in place for compatibility. First confirmation remains 201 and repeat confirmation 200 with the same IDs. Whether the wire contract should rename `lines` to `records`, and whether repeat success must use 201, require team agreement.
+- **`verifiedFields`:** This remains an optional wire extension not specified in Milestone 3. It accepts only `itemName`, `quantity`, and `unitPrice`; it records the owner's explicit review of an unchanged non-HIGH-confidence draft value. A corrected value does not need a marker, and HIGH-confidence values do not need one. Unknown names are rejected. The extension is retained for compatibility with the merged implementation and remains subject to team approval.
+
+### Milestone 4 files changed
+
+| File | Change |
+| --- | --- |
+| `backend/app/main.py` | Standardizes request-validation detail fields, documents confirmation/verification semantics in OpenAPI, and adds inclusive optional sales-history date parameters and range validation. |
+| `backend/app/repository.py` | Applies optional owner-scoped inclusive date bounds to confirmed-only sales queries. |
+| `backend/tests/test_database.py` | Adds API field-error and inclusive/unbounded sales-date regressions. |
+| `backend/tests/smoke_http.py` | Exercises the standard error detail shape and date-filtered HTTP history through the frontend proxy. |
+| `frontend/src/components/SalesHistory.jsx` | Adds optional From/To date filters, submits bounds to the API, and blocks reversed ranges. Empty filters preserve the full-history behavior. |
+| `frontend/src/components/SalesReview.test.jsx` | Tests date query parameters and invalid range handling in the history interface. |
+| `docs/GABRIEL_IMPLEMENTATION.md` | Records the merged PR #1 state, Milestone 4 decisions, compatibility assumptions, and verification results below. |
+
+### Milestone 4 verification
+
+| Check | Actual result |
+| --- | --- |
+| `docker compose -f docker-compose.yml config --quiet` | Passed. |
+| `docker compose -p bodega-gabriel-m4 -f compose.test.yml --profile smoke config --quiet` | Passed. |
+| Frontend ESLint (`npm.cmd run lint`) | Passed. |
+| Frontend Vitest (`npm.cmd test`) | **21 passed** in one test file. |
+| Frontend production build (`npm.cmd run build`) | Passed; Vite transformed 19 modules. Generated output is ignored under `frontend/dist`. |
+| Python syntax parse | Passed for `main.py`, `repository.py`, `test_database.py`, and `smoke_http.py`. |
+| `git diff --check` | Passed; Git reported only expected LF-to-CRLF working-copy notices. |
+| Docker image build / PostgreSQL backend suite / HTTP smoke | Initially blocked; completed successfully in the final validation below: 60 backend tests passed and HTTP smoke passed. |
+| Host backend pytest | Not used in final validation; the documented Docker Python environment supplies the required dependencies. |
+
+The initial environment blockers are resolved by the final Docker validation below. Frontend lint/test/build results above are from the preceding implementation session and were not rerun during backend validation. No commit, push, or merge has been performed.
+
+### Final Docker and PostgreSQL validation (2026-11-02 local time)
+
+The current branch remains `gabriel/milestone4-api-contract`, based on merge commit `94d304f`. All pre-existing source changes and the six untracked reference files were preserved. This validation changed only this report; no implementation fixes or dependency changes were needed.
+
+Docker Desktop 4.97.0 / Engine 29.9.2 is healthy on the `desktop-linux` context under WSL2. The first sandboxed connectivity checks returned a named-pipe permission denial. Approved execution outside that restricted sandbox succeeded for `docker version`, `docker info`, and `docker ps`. No Windows ACLs, groups, service permissions, or security settings were changed. No Windows repair is currently necessary.
+
+Validation used the separate Compose project `bodega-m4-final-20261102`. Its PostgreSQL 16.15 database uses tmpfs and has no host port binding. No application database was reset or migrated, no persistent volume was deleted, and no existing container was removed or recreated. The original four stopped containers retain their IDs and state. The new PostgreSQL/backend services remain healthy and running, and the new frontend smoke service remains running; the backend-test and HTTP-smoke containers are retained with exit code 0. No cleanup command was executed.
+
+The backend Dockerfile provides the documented isolated Python environment (Python 3.12.16), so no host virtual environment or host package installation was needed. Its requirements installation layer was cached; `pip check` found no broken requirements. Installed versions include FastAPI 0.162.0, Pydantic 2.14.2, psycopg 3.3.6, pytest 9.2.0, httpx 0.28.1, python-multipart 0.0.33, and uvicorn 0.54.0. The requirements file remains unchanged.
+
+| Check | Actual final result |
+| --- | --- |
+| Both Compose configurations and all four required image builds | Passed. |
+| Complete PostgreSQL backend Pytest suite | **60 passed, 0 failed, 0 skipped**, 30.41 seconds; 1 existing Starlette/httpx deprecation warning. |
+| Coverage exercised by that suite | Schema initialization, migration upgrade/reapplication, constraints, rollback, duplicate/concurrent confirmation, owner isolation, lifecycle, draft linkage/provenance, verifiedFields, exact decimals, optional inclusive date filters, and error statuses/details. |
+| HTTP smoke script | **Passed, exit 0**: frontend HTML/proxy, persisted draft, first confirmation 201, repeat 200 with identical IDs, exact-decimal history, inclusive date query, unauthorized 401, extraction 400, confirmation 422. This is one script, not an additional Pytest test count. |
+| Migration reapplication | Passed; ledger contains exactly 001, 002, and 003. Four domain tables plus the migration ledger exist. |
+| Database integrity | 0 inconsistent confirmed states, 0 mismatched parent/record dates, 0 duplicate submission/line pairs, 0 unvalidated constraints, 0 leftover test schemas. One confirmed smoke submission remains in the isolated database. |
+| Dependency consistency | `python -m pip check`: no broken requirements. |
+
+Milestone 3 compatibility was checked against the DOCX and current routes: transactional confirmation, repeat IDs without duplicates, confirmed-only history, and extraction validation 400 are exercised successfully. The existing `lines` request and `{submissionId, recordIds, created}` response remain compatible with the merged implementation. Milestone 3 does not specify the sales-history HTTP date defaults or a universal error envelope, and does not define `verifiedFields`. Team acceptance of those wire conventions and confirmation validation 422 remains outstanding as described above. Passing these tests does not establish completion of teammates' ingestion, analysis, or deployment features. The Starlette/httpx deprecation warning is a future dependency-maintenance concern, not a failing check.
+
+Exact validation commands executed from the repository root (Docker commands requiring engine access used approved execution outside the restricted sandbox):
+
+```powershell
+docker version
+docker info
+docker ps
+docker ps -a --format '{{.ID}} {{.Names}} {{.Status}}'
+docker compose -f docker-compose.yml config --quiet
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke config --quiet
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke build backend-tests backend-smoke frontend-smoke http-smoke
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml run --name bodega-m4-final-backend-tests backend-tests
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke up -d --no-recreate backend-smoke frontend-smoke
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke exec -T backend-smoke python --version
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke exec -T backend-smoke python -m pip check
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke exec -T backend-smoke python -m pip list --format=freeze
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke run --name bodega-m4-final-http-smoke --no-deps http-smoke
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke exec -T backend-smoke python -m app.database
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml exec -T postgres-test psql -v ON_ERROR_STOP=1 -U bodega_test -d bodega_test -c "SELECT version(); SELECT version FROM schema_migrations ORDER BY version; SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name; SELECT count(*) AS leftover_test_schemas FROM information_schema.schemata WHERE schema_name LIKE 'test_%'; SELECT count(*) AS inconsistent_submissions FROM submissions s WHERE (s.status='CONFIRMED') <> EXISTS (SELECT 1 FROM sales_records r WHERE r.submission_id=s.id); SELECT count(*) AS mismatched_sales_dates FROM sales_records r JOIN submissions s ON s.id=r.submission_id WHERE r.sale_date<>s.sale_date; SELECT count(*) AS duplicate_lines FROM (SELECT submission_id,line_number FROM sales_records GROUP BY submission_id,line_number HAVING count(*)>1) d; SELECT count(*) AS unvalidated_constraints FROM pg_constraint WHERE connamespace='public'::regnamespace AND NOT convalidated; SELECT status,count(*) FROM submissions GROUP BY status;"
+docker compose -p bodega-m4-final-20261102 -f compose.test.yml --profile smoke ps -a
+git diff --check
+git status --short --branch
+```
+
+The named test containers are intentionally retained. Repeating the `run --name` commands requires a new unique container name or separately approved cleanup. Compose emitted an orphan-container notice for the retained test runner; no `--remove-orphans` action was taken. There are no remaining Docker/backend execution blockers from this validation.
+
 ## 1. Completed responsibilities and evidence
 
 `WorkDivision.docx` assigns Gabriel the PostgreSQL Owners/Submissions/Sales/Baselines schema, transactional `POST /api/v1/confirm`, database rollback/duplicate-confirmation tests, interactive Draft Review, and confirmed Sales History. These portions are implemented. The defects reproduced during the initial section 11 audit are corrected by the approved scoped patch in section 12. The local patch is ready for team review; team contract acceptance and wider integration gaps remain before merge. The Milestone 3 data dictionary, lifecycle discussion, ERD, and state diagram guided the design; Milestone 2 supplies the baselined numeric and confidence rules. Milestone 1 supplies the original product context. All four DOCX files were parsed directly from their Word XML; no Word installation was needed.

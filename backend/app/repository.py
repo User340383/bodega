@@ -127,15 +127,17 @@ def save_sales_records(request):
     return ids, True
 
 
-def get_confirmed_records(limit=100, offset=0):
+def get_confirmed_records(limit=100, offset=0, *, start_date=None, end_date=None):
     with connect() as conn:
         conn.row_factory = dict_row
         return conn.execute("""SELECT r.id, r.submission_id AS "submissionId", r.item_name AS "itemName",
             r.quantity, r.unit_price AS "unitPrice", r.sale_date AS "saleDate", r.source
             FROM sales_records r JOIN submissions s ON s.id=r.submission_id
             WHERE s.owner_id=%s AND s.status='CONFIRMED'
+              AND (%s::date IS NULL OR r.sale_date >= %s)
+              AND (%s::date IS NULL OR r.sale_date <= %s)
             ORDER BY r.sale_date DESC, s.created_at DESC, s.id, r.line_number LIMIT %s OFFSET %s""",
-            (owner_id(), limit, offset)).fetchall()
+            (owner_id(), start_date, start_date, end_date, end_date, limit, offset)).fetchall()
 
 
 def start_manual_review(submission_id):

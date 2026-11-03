@@ -107,6 +107,26 @@ describe('Confirmed sales ledger', () => {
     expect(await screen.findByText('Milk')).toBeInTheDocument()
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2))
   })
+
+  it('applies inclusive date bounds in the request and validates reversed ranges', async () => {
+    const request = vi.fn().mockResolvedValue({ records: [] })
+    const user = userEvent.setup()
+    render(<SalesHistory request={request} revision={0} />)
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1))
+    expect(request.mock.calls[0][0]).toBe('/api/v1/sales?limit=100&offset=0')
+    await user.type(screen.getByLabelText('From date'), '2026-10-01')
+    await user.type(screen.getByLabelText('To date'), '2026-10-07')
+    await user.click(screen.getByRole('button', { name: 'Filter dates' }))
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2))
+    expect(request.mock.calls[1][0]).toContain('startDate=2026-10-01')
+    expect(request.mock.calls[1][0]).toContain('endDate=2026-10-07')
+
+    await user.clear(screen.getByLabelText('From date'))
+    await user.type(screen.getByLabelText('From date'), '2026-10-08')
+    expect(screen.getByRole('alert')).toHaveTextContent('End date must be on or after start date.')
+    expect(screen.getByRole('button', { name: 'Filter dates' })).toBeDisabled()
+    expect(request).toHaveBeenCalledTimes(2)
+  })
 })
 
 
