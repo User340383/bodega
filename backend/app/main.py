@@ -18,7 +18,6 @@ from fastapi import (
     Response,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from contextlib import asynccontextmanager
@@ -44,11 +43,10 @@ async def database_error(request, exc):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error(request, exc):
-    if request.method == "POST" and request.url.path == "/api/v1/extract":
-        # Do not echo raw input or validation context into the response.
-        details = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
-        return JSONResponse(status_code=400, content={"detail": details})
-    return await request_validation_exception_handler(request, exc)
+    # Keep one field-error shape across routes and avoid echoing submitted values.
+    details = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
+    is_extraction = request.method == "POST" and request.url.path == "/api/v1/extract"
+    return JSONResponse(status_code=400 if is_extraction else 422, content={"detail": details})
 
 
 def extraction_validation_error(field, message):
@@ -85,7 +83,10 @@ class ConfirmLine(BaseModel):
     itemName: str = Field(min_length=1)
     quantity: Decimal = Field(gt=0, allow_inf_nan=False)
     unitPrice: Decimal = Field(ge=0, allow_inf_nan=False)
-    verifiedFields: list[str] = Field(default_factory=list)
+    verifiedFields: list[str] = Field(
+        default_factory=list,
+        description="Fields the owner explicitly reviewed without changing; required for unchanged non-HIGH-confidence draft values.",
+    )
 
     @field_validator("itemName")
     @classmethod
@@ -105,7 +106,16 @@ class ConfirmLine(BaseModel):
 
 class ConfirmRequest(BaseModel):
     submissionId: UUID
-    lines: list[ConfirmLine] = Field(min_length=1, max_length=100)
+    lines: list[ConfirmLine] = Field(
+        min_length=1, max_length=100,
+        description="Confirmed sales rows. The existing wire name is retained for compatibility.",
+    )
+
+
+class ConfirmResponse(BaseModel):
+    submissionId: UUID
+    recordIds: list[UUID]
+    created: bool
 
 
 class SalesRecordResponse(BaseModel):
@@ -172,7 +182,7 @@ async def extract(
     }
 
 
-@app.post("/api/v1/confirm", status_code=status.HTTP_201_CREATED)
+@app.post("/api/v1/confirm", status_code=status.HTTP_201_CREATED, response_model=ConfirmResponse)
 def confirm(request: ConfirmRequest, response: Response, _: None = Depends(require_owner_access)):
     ids, created = repository.save_sales_records(request)
     response.status_code = 201 if created else 200
@@ -191,9 +201,17 @@ def manual_review(submission_id: UUID, _: None = Depends(require_owner_access)):
 
 
 @app.get("/api/v1/sales", response_model=SalesHistoryResponse)
-def sales(limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0),
+def sales(startDate: date | None = Query(default=None, description="Inclusive first sale date; omitted means no lower date bound."),
+          endDate: date | None = Query(default=None, description="Inclusive last sale date; omitted means no upper date bound."),
+          limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0),
           _: None = Depends(require_owner_access)):
-    return {"records": repository.get_confirmed_records(limit, offset), "limit": limit, "offset": offset}
+    if startDate is not None and endDate is not None and startDate > endDate:
+        raise HTTPException(422, detail=[{
+            "loc": ["query", "endDate"],
+            "msg": "endDate must be on or after startDate",
+            "type": "value_error",
+        }])
+    return {"records": repository.get_confirmed_records(limit, offset, start_date=startDate, end_date=endDate), "limit": limit, "offset": offset}
 
 
 @app.get("/api/v1/analysis")

@@ -41,8 +41,8 @@ def client(db):
         yield client
 
 
-def make_submission(state='NEEDS_VERIFICATION', payload=None):
-    sid = repository.create_submission(date.today(), draft_payload=payload)
+def make_submission(state='NEEDS_VERIFICATION', payload=None, sale_date=None):
+    sid = repository.create_submission(sale_date or date.today(), draft_payload=payload)
     if state != 'UPLOADED':
         repository.update_status(sid, 'CLASSIFYING')
     if state not in ('UPLOADED', 'CLASSIFYING'):
@@ -86,6 +86,44 @@ def test_confirm_and_repeat_and_history(client):
     assert records[0]['quantity'] == '2.5'
     assert records[0]['saleDate'] == date.today().isoformat()
     assert client.get('/api/v1/submissions/' + str(sid)).json()['lines'] == []
+
+
+def test_sales_history_date_filters_are_inclusive_and_optional(client):
+    dates = [date.today() - timedelta(days=2), date.today() - timedelta(days=1), date.today()]
+    submission_ids = [make_submission(sale_date=sale_date) for sale_date in dates]
+    for sid in submission_ids:
+        assert client.post('/api/v1/confirm', json=body(sid)).status_code == 201
+
+    all_rows = client.get('/api/v1/sales').json()
+    assert [row['saleDate'] for row in all_rows['records']] == [item.isoformat() for item in reversed(dates)]
+    assert (all_rows['limit'], all_rows['offset']) == (100, 0)
+    bounded = client.get('/api/v1/sales', params={
+        'startDate': dates[0].isoformat(), 'endDate': dates[1].isoformat(),
+    }).json()['records']
+    assert [row['saleDate'] for row in bounded] == [dates[1].isoformat(), dates[0].isoformat()]
+    assert [row['saleDate'] for row in client.get('/api/v1/sales', params={
+        'startDate': dates[1].isoformat(),
+    }).json()['records']] == [dates[2].isoformat(), dates[1].isoformat()]
+
+
+def test_api_validation_errors_share_field_detail_shape_without_input_echo(client):
+    response = client.post('/api/v1/confirm', json={'submissionId': 'not-a-uuid', 'lines': []})
+    assert response.status_code == 422
+    errors = response.json()['detail']
+    assert errors and all(set(error) == {'loc', 'msg', 'type'} for error in errors)
+    assert all('input' not in error and 'ctx' not in error for error in errors)
+
+    response = client.get('/api/v1/sales', params={
+        'startDate': '2026-02-03', 'endDate': '2026-02-02',
+    })
+    assert response.status_code == 422
+    assert response.json()['detail'][0]['loc'] == ['query', 'endDate']
+    assert set(response.json()['detail'][0]) == {'loc', 'msg', 'type'}
+
+    response = client.get('/api/v1/sales', params={'startDate': 'not-a-date'})
+    assert response.status_code == 422
+    assert response.json()['detail'][0]['loc'] == ['query', 'startDate']
+    assert set(response.json()['detail'][0]) == {'loc', 'msg', 'type'}
 
 
 @pytest.mark.parametrize('changes', [{'itemName': '  '}, {'quantity': '0'}, {'quantity': '-1'}, {'quantity': 'NaN'}, {'quantity': 'Infinity'}, {'unitPrice': '-0.01'}, {'unitPrice': 'NaN'}, {'unitPrice': 'Infinity'}])
