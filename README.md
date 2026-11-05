@@ -21,6 +21,16 @@ docker compose exec backend python -m app.seed
 
 Connect in the frontend and open submission `10000000-0000-4000-8000-000000000003`. Verify or edit its highlighted unit price, then confirm. The confirmed ledger refreshes automatically. Seeding is optional and never runs at startup.
 
+## Results dashboard
+
+The Results dashboard shows seven-logged-date averages, trends and sales-based planning guidance. See [the analysis and guidance report](docs/DIUSHEN_IMPLEMENTATION.md) for formulas, assumptions and contracts. To try it with synthetic history:
+
+```sh
+docker compose exec backend python -m app.seed_analysis
+```
+
+`AI_PROVIDER=mock` needs no paid key. Mock wording demonstrates the integration only, not real-provider quality.
+
 ## Isolated tests
 
 This uses a separate Compose project, an unexposed PostgreSQL test service backed by tmpfs, and a unique schema per backend test. It does not use application database volumes.

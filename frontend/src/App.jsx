@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import DraftReview from './components/DraftReview'
+import ResultsDashboard from './components/ResultsDashboard'
 import SalesHistory from './components/SalesHistory'
 import './App.css'
 
@@ -49,6 +50,7 @@ function App() {
         {error && <p role="alert">{error}</p>}
       </section>
       {draft && <DraftReview key={`${draft.submissionId}:${draftVersion}`} draft={draft} request={request} onConfirmed={() => setRevision(revision + 1)} />}
+      <ResultsDashboard key={accessCode} request={request} revision={revision} />
       <SalesHistory key={`${accessCode}:${revision}`} request={request} revision={revision} />
     </>}
   </main>
