@@ -149,3 +149,18 @@ def start_manual_review(submission_id):
         if row[0] not in ('REJECTED', 'AI_UNAVAILABLE'):
             raise HTTPException(409, 'Submission is not eligible for manual review')
         conn.execute("UPDATE submissions SET status='NEEDS_VERIFICATION', draft_payload=NULL WHERE id=%s", (submission_id,))
+
+
+def get_confirmed_sales_between(start_date, end_date):
+    """Every confirmed row in an inclusive date range, oldest first, for analysis.
+
+    Deliberately unpaginated: get_confirmed_records serves the UI ledger one page at a time,
+    and analysing only its first page would silently drop history.
+    """
+    with connect() as conn:
+        conn.row_factory = dict_row
+        return conn.execute("""SELECT r.item_name AS "itemName", r.quantity, r.sale_date AS "saleDate"
+            FROM sales_records r JOIN submissions s ON s.id=r.submission_id
+            WHERE s.owner_id=%s AND s.status='CONFIRMED' AND r.sale_date BETWEEN %s AND %s
+            ORDER BY r.sale_date, s.created_at, s.id, r.line_number""",
+            (owner_id(), start_date, end_date)).fetchall()

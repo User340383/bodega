@@ -1,0 +1,60 @@
+.results-dashboard { --series-sales: #3a9a78; --series-average: #bb6c1d; --ink-muted: #5a6b62; --hairline: #d2ddd5; }
+.results-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1rem; }
+.results-controls label { display: inline-flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.results-dashboard button.secondary { background: white; color: #235c43; }
+.results-body { transition: opacity .15s; }
+.results-body.is-stale { opacity: .55; }
+.results-scope { margin: .5rem 0; }
+.results-status { background: #eef3ef; border-left: 4px solid #235c43; padding: .6rem .8rem; margin: .5rem 0; }
+.results-basis { color: var(--ink-muted); font-size: .9rem; margin: .4rem 0; }
+
+.item-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+.item-card { border: 1px solid var(--hairline); border-radius: 8px; padding: 1rem; min-width: 0; }
+.item-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.item-heading h4 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.item-figures { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: .8rem 0 .4rem; }
+.item-figures dt { color: var(--ink-muted); font-size: .8rem; }
+.item-figures dd { margin: 0; font-size: 1.25rem; font-weight: 600; overflow-wrap: anywhere; }
+.item-note { color: var(--ink-muted); font-size: .85rem; margin: .3rem 0 .6rem; }
+
+.trend-badge { display: inline-flex; align-items: center; gap: .3rem; padding: .15rem .55rem; border: 1px solid currentColor; border-radius: 999px; font-size: .8rem; font-weight: 600; white-space: nowrap; }
+.trend-up { color: #1c6b4c; background: #e7f4ee; }
+.trend-down { color: #a02323; background: #fbecec; }
+.trend-stable { color: #3c4f60; background: #eef1f4; }
+.trend-unknown { color: #6b5a12; background: #fff8dc; border-style: dashed; }
+
+.trend-chart { min-width: 0; }
+.trend-chart svg { display: block; width: 100%; height: auto; }
+.chart-grid { stroke: var(--hairline); stroke-width: 1; }
+.chart-text { fill: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chart-bar { fill: var(--series-sales); }
+.chart-absent { fill: white; stroke: var(--ink-muted); stroke-width: 1.5; }
+.chart-gap { stroke: var(--ink-muted); stroke-width: 2; }
+.chart-average { fill: none; stroke: var(--series-average); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-average-end { fill: var(--series-average); stroke: white; stroke-width: 2; }
+.chart-active { fill: #eef3ef; }
+.chart-hit { fill: transparent; cursor: default; }
+.chart-readout { color: var(--ink-muted); font-size: .85rem; min-height: 2.4em; margin: .3rem 0; }
+.chart-unavailable { background: #fff8dc; padding: .6rem .8rem; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; list-style: none; margin: .3rem 0 .6rem; padding: 0; font-size: .8rem; }
+.chart-legend li { display: inline-flex; align-items: center; gap: .4rem; }
+.key { display: inline-block; flex: none; }
+.key-bar { width: 10px; height: 12px; background: var(--series-sales); border-radius: 2px 2px 0 0; }
+.key-line { width: 18px; height: 2px; background: var(--series-average); }
+.key-absent { width: 9px; height: 9px; border: 1.5px solid var(--ink-muted); border-radius: 50%; }
+.key-gap { width: 2px; height: 14px; background: var(--ink-muted); }
+.trend-chart details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.trend-chart td { overflow-wrap: anywhere; }
+
+.guidance-panel { border-top: 1px solid var(--hairline); margin-top: 1.25rem; padding-top: 1rem; }
+.guidance-panel h3 { margin-top: 0; }
+.guidance-intro, .guidance-reason { color: var(--ink-muted); font-size: .9rem; }
+.guidance-items { padding-left: 1.2rem; }
+.guidance-items li { margin: .4rem 0; overflow-wrap: anywhere; }
+.stock-notice { background: #fff8dc; border-left: 4px solid #bb6c1d; padding: .6rem .8rem; }
+
+@media (max-width: 600px) {
+  .item-card { padding: .7rem; }
+  .chart-text { font-size: 20px; } /* SVG units: about 10px on screen at phone width. */
+  .trend-chart svg { overflow: visible; }
+}

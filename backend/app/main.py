@@ -25,7 +25,11 @@ from contextlib import asynccontextmanager
 import logging
 import psycopg
 from . import repository
+from .analysis import AnalysisResponse, BaselineAnalyzer, IsoDate, resolve_as_of
+from .clock import Clock, get_clock
 from .database import migrate
+from .guidance import GuidanceEngine, GuidanceResponse
+from .llm import WordingProvider, get_wording_provider
 
 @asynccontextmanager
 async def lifespan(app):
@@ -125,7 +129,7 @@ class SalesHistoryResponse(BaseModel):
 
 
 class GuidanceRequest(BaseModel):
-    asOf: date | None = None
+    asOf: IsoDate | None = None
 
 
 @app.get("/health")
@@ -196,29 +200,22 @@ def sales(limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0),
     return {"records": repository.get_confirmed_records(limit, offset), "limit": limit, "offset": offset}
 
 
-@app.get("/api/v1/analysis")
+@app.get("/api/v1/analysis", response_model=AnalysisResponse)
 def analysis(
-    asOf: date | None = None,
+    asOf: IsoDate | None = None,
     _: None = Depends(require_owner_access),
+    clock: Clock = Depends(get_clock),
 ):
-    return {
-        "asOf": (asOf or date.today()).isoformat(),
-        "loggedDays": 0,
-        "requiredDays": 7,
-        "status": "INSUFFICIENT_HISTORY",
-        "estimates": [],
-    }
+    return BaselineAnalyzer().analyze(resolve_as_of(asOf, clock, ["query", "asOf"]))
 
 
-@app.post("/api/v1/guidance")
+# A sync route: FastAPI runs it on a worker thread, so waiting on a provider never blocks the event loop.
+@app.post("/api/v1/guidance", response_model=GuidanceResponse)
 def guidance(
     request: GuidanceRequest,
     _: None = Depends(require_owner_access),
+    clock: Clock = Depends(get_clock),
+    provider: WordingProvider = Depends(get_wording_provider),
 ):
-    return {
-        "items": [],
-        "source": "TEMPLATE",
-        "groundingPassed": False,
-        "failedRule": "MOCK_PLACEHOLDER",
-        "stockNotice": None,
-    }
+    as_of = resolve_as_of(request.asOf, clock, ["body", "asOf"])
+    return GuidanceEngine(provider).generate(BaselineAnalyzer().analyze(as_of))
