@@ -1,3 +1,382 @@
+# Gabriel-only local commit scope — November 5, 2026
+
+This packaging review takes precedence over the historical session reports below when describing the contents of Gabriel's local commit. It includes only backend/data responsibilities and their validation/configuration/documentation. All frontend changes, environment files/templates, archives, imported specification documents and teammate implementations remain unstaged. No implementation working file was rewritten to prepare the commit; shared files were partially staged.
+
+## Ownership boundary
+
+- `main.py`: stage data validation/error envelopes, exact decimal responses, confirmation, manual entries, confirmed history, pending submissions, retention startup and post-commit deletion. Extraction, analysis and guidance handlers remain identical to their previous committed integration placeholders. The newer teammate implementations remain in the working tree.
+- `schemas.py`: stage only the `BaselineEstimate` persistence input schema; analysis/guidance response models remain unstaged.
+- `test_workflows.py`: stage storage fixtures and the six data-owned owner-isolation, deletion, forced-restart, private-bucket, durable-retry and safe-log tests. AI, privacy and analysis integration tests remain unstaged. The storage-expiry test that imports Jose's untracked sanitizer also remains unstaged.
+- Leave the extraction-compensation HTTP regression and fallback-initialization HTTP regression unstaged with the extraction integration they exercise. Their low-level durable orphan-discovery and transaction coverage remains included.
+- Leave `analysis.py` and `test_analysis_business_date.py` unstaged: the small business-date correction is inside Diushen's currently untracked analysis implementation and cannot be committed independently without absorbing that component. No completed local work was discarded.
+
+## Verification of the staged snapshot
+
+The staged index was exported into a separate temporary directory, built as `bodega-gabriel-commit-backend`, and tested without unstaged teammate modules. **199 backend tests passed, zero failures/skips, in 27.46 seconds**, with one existing Starlette/httpx deprecation warning. PostgreSQL and MinIO were real isolated services. This includes all four new migrations, populated upgrade/rollback checks, confidence and state boundaries, mixed draft IDs, canonical snapshot lookup, confirmation idempotency/concurrency, ten forced process restarts, durable deletion/crash recovery, orphan discovery, R2 compatibility mocks, MinIO signed retrieval, and business-timezone confirmation/manual validation.
+
+```powershell
+docker build -t bodega-gabriel-commit-backend <temporary-staged-snapshot>/backend
+docker run --rm --network bodega-gabriel-validation_default -e TEST_DATABASE_URL=postgresql://bodega_test:test-only-password@postgres-test:5432/bodega_test -e TEST_S3_ENDPOINT=http://minio-test:9000 bodega-gabriel-commit-backend python -m pytest -q -ra --tb=short
+git diff --cached --check
+```
+
+The earlier **286 passing backend tests** covered the complete working tree, including unstaged teammate integrations. That result is not presented as the test count for this isolated commit. Frontend changes are excluded entirely; previous frontend results remain historical working-tree evidence.
+
+Staged-file review found no private keys, live provider tokens, credentials or environment files. The only credential literals are explicitly disposable test fixtures. R2's S3 `GetBucketPolicy` incompatibility is addressed by supported managed/custom-domain privacy checks; uploads require a backend `CLOUDFLARE_API_TOKEN` with read access to those settings and fail closed if verification is unavailable. No live R2 credentials/connectivity were available. MinIO retains its private-policy guard.
+
+Formal `verifiedFields` contract approval and SQLAlchemy/Alembic coordination with Luis remain outstanding. Team extraction, analysis/guidance, frontend shell/API integration and final deployment are not certified by this commit. Migrations 001–003 are untouched; 004–007 preserve compatible records and refuse incompatible historical data without destructive remediation. Nothing is pushed, merged or submitted as a PR by this packaging operation.
+
+## Exact included files
+
+```text
+README.md
+backend/Dockerfile
+backend/app/clock.py
+backend/app/data_lifecycle.py
+backend/app/database.py
+backend/app/image_cleanup.py
+backend/app/lifecycle.py
+backend/app/main.py                         (partial staging)
+backend/app/repository.py
+backend/app/schemas.py                      (partial staging)
+backend/app/seed.py
+backend/app/storage.py
+backend/migrations/004_baseline_v1.sql
+backend/migrations/005_final_integrity.sql
+backend/migrations/006_strict_final_schema.sql
+backend/migrations/007_image_deletion_outbox.sql
+backend/requirements.txt
+backend/tests/test_database.py              (partial staging)
+backend/tests/test_final_contract.py
+backend/tests/test_image_cleanup.py         (partial staging)
+backend/tests/test_review_regressions.py
+backend/tests/test_storage_compatibility.py
+backend/tests/test_workflows.py             (partial staging)
+compose.test.yml
+docs/DATA_STATE_COMPLETION.md
+docs/GABRIEL_IMPLEMENTATION.md
+```
+
+# Historical session reports
+
+# Current closure review: durable image deletion retry
+
+November 5, 2026. This review supersedes earlier statements below that image-deletion retries are unfinished. Authority: final Milestone 3, Sections 5.4 (delete after database commit; retry on next purge) and 7.4 (retention and deletion), `docs/Milestone_3_Final.pdf`, October 23, 2026. Its SHA-256 remains `9efabad91d280952c282325a46bc1657c60c033b2eb82c4d1d68ac77f025f646`. Review basis is the reported post-commit key-loss finding and the final PDF; no separate audit attachment was accessible in this turn.
+
+## Outcome and scope
+
+**Gabriel's durable image-deletion retry implementation is complete and verified.** A failed storage request no longer loses the image key after the submission transaction commits. Confirmation and uncertain-field validation are unchanged. No teammate component, frontend source, dependency manifest, existing migration, persistence framework, or public API contract was changed in this closure review.
+
+Overall final submission remains conditional on the formal approvals and teammate integrations listed below. Passing this suite does not establish whole-project Milestone 3 compliance.
+
+## Durable mechanism
+
+New migration `007_image_deletion_outbox.sql` adds an operational `image_deletion_jobs` outbox. It changes no existing rows or migrations 001-006. The queue has no FK to submissions or owners, so deleting a parent cannot discard its cleanup obligation.
+
+| Column | Definition / purpose |
+| --- | --- |
+| bucket_name | Nonblank text; part of PK; pins the intended bucket |
+| image_key | Nonblank text; part of PK; private storage identifier |
+| created_at | UTC timestamptz, database default now |
+| attempt_count | Nonnegative integer, initially zero |
+| last_attempt_at | Nullable UTC timestamptz; last committed attempt |
+
+The submission delete, sales cascade, owner-snapshot invalidation and outbox insertion use the **same PostgreSQL transaction**. Failure of any database step rolls them all back. No image delete is attempted before that commit. An unknown bucket prevents the destructive transaction and preserves the submission/key for correction.
+
+After commit the endpoint attempts the queued delete and still returns its documented 204 when storage is unavailable. Failed jobs persist. Startup and the existing daily RetentionService sweep drain pending jobs, including keys whose original submission is already gone. Retention cleanup also queues keys atomically before clearing raw references or removing expired submissions, then accesses storage after commit.
+
+`image_cleanup.process_pending` attempts each selected job once per invocation. Each attempt locks its job using `FOR UPDATE SKIP LOCKED`; concurrent workers cannot process the same locked job. A failed key does not prevent attempts for other keys. Only jobs for the configured bucket are processed, and any key still referenced by a live submission is protected. Success removes the job; failure commits attempt metadata and leaves it retryable indefinitely. No deadline silently discards obligations.
+
+If the worker crashes after storage accepts DELETE but before the job acknowledgement commits, the job remains. The next process safely repeats S3 DELETE; deleting a missing key is idempotent. No database row is recreated and no sales confirmation is repeated. The daily task now also survives transient PostgreSQL failures, logs a sanitized message, and attempts the next scheduled sweep.
+
+Queue contents contain only private object identity and operational timestamps/counters. Raw input, signed URLs, access codes, provider error bodies and credentials are not persisted in the outbox or written to cleanup logs. No cleanup endpoint or queue data was exposed to the frontend.
+
+## Traceability and regression evidence
+
+| Requirement / finding | Implementation | Verification | Status |
+| --- | --- | --- | --- |
+| Section 5.4: delete the object after DB commit | `data_lifecycle.delete_submission`, same-transaction enqueue, then `main.delete_one` processing | A storage observer opens a different DB connection and sees the committed deletion and job before S3 is called | COMPLETE |
+| Section 5.4: retry a failed post-commit delete on next purge | `image_cleanup.py`, `data_lifecycle.sweep`, existing startup/daily callbacks | Failed DELETE returns 204; key persists after submission and owner deletion; later sweep removes real MinIO object/job | COMPLETE |
+| Crash between commit and first storage attempt | Durable outbox PK and transaction | Delete helper commits with no immediate attempt; a later worker processes the persisted job | COMPLETE |
+| Crash after S3 success but before DB acknowledgement | Per-job transaction and idempotent DELETE | Real subprocess exits with code 23 after deleting from MinIO; another subprocess completes the persisted job | COMPLETE |
+| Application restart recovery | Existing lifespan invokes sweep and queue drain | New TestClient lifespan consumes an already-committed job | COMPLETE |
+| Preserve transactional failure guarantees | Enqueue uses caller's connection | Injected database delete failure preserves sales, snapshots and object, rolls back job, and makes no storage call | COMPLETE |
+| Section 7.4: retention retries without losing confirmed history | Queue insertion with raw-reference clearing/open-submission removal | Expired confirmed history remains; expired open submission is removed; both failed keys persist and succeed on later sweep | COMPLETE |
+| Concurrent cleanup workers | Per-job `FOR UPDATE SKIP LOCKED` | Two workers attempt one job; only one storage call succeeds | COMPLETE |
+| Bucket identity / referenced-object safety | Bucket-qualified PK/query; live-reference check | Wrong bucket makes no attempt; shared live key is protected; duplicate obligations coalesce and later complete | COMPLETE |
+| Outage isolation | Storage errors handled per job; daily task catches storage and DB failures | One failed key does not block another; simulated daily ticks continue through both kinds of outage without private values in logs | COMPLETE |
+| Preserve populated database and repeatable upgrade | Additive migration 007 | Populated v6 sales, snapshot rows and previous ledger timestamps compare identically after upgrade/reapplication | COMPLETE |
+| Explicit verification of uncertain fields | Existing repository/ConfirmLine/DraftReview behavior retained | Full uncertain-field, duplicate-link, rollback and confirmation suites still pass | Implementation preserved; formal `verifiedFields` contract approval pending |
+
+There are **13 new tests** in `backend/tests/test_image_cleanup.py`. Real PostgreSQL and isolated MinIO exercise persistence and object deletion. External failures are injected through the existing storage interface. No paid AI or production R2 integration is claimed.
+
+## Exact final results
+
+| Check | Result |
+| --- | --- |
+| Full backend suite | **239 passed**, zero failures/skips, **85.36 seconds**, one existing Starlette/httpx TestClient deprecation warning |
+| Full frontend suite | **30 passed**, 3 files, **1.65 seconds** |
+| Frontend ESLint | Exit 0 |
+| Vite production build | Exit 0, 22 modules, **133 ms** |
+| Docker Engine | **29.9.2**, connection verified |
+| Normal and isolated Compose configuration | Both `config --quiet` checks passed |
+| Isolated runtime | PostgreSQL and backend healthy; frontend and MinIO running |
+| HTTP smoke | Passed existing capture/history regressions and canonical manual-entry, confirmation replay, numeric history, validation envelope, pending drafts and submission deletion |
+| PostgreSQL migrations | All seven versions **001-007** applied in the isolated database; explicit reapplication exit 0 |
+| Isolated integrity inspection | **0** pending image jobs, **0** leftover test schemas, **0** inconsistent confirmed submissions, **0** orphan sales |
+| Git | `git diff --check` passed; nothing staged, committed, pushed or merged |
+
+The full backend suite includes existing real-time 30-second x2 extraction deadlines, 15-second guidance deadlines and ten forced backend-process restarts. The old analysis/guidance regression tests check that existing teammate behavior is preserved; they do not certify that behavior against the approved seven-day/template rules. Frontend tests for the frozen capture/shell use mocks and do not certify live integration of their outdated endpoints.
+
+Commands executed from the repository root:
+
+```powershell
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke build backend-tests backend-smoke http-smoke frontend-checks frontend-smoke
+# Targeted first pass, before the final worker-outage regression was added:
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm backend-tests python -m pytest -q -ra tests/test_image_cleanup.py
+# Final complete validation:
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm backend-tests
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm --no-deps frontend-checks
+docker compose config --quiet
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke config --quiet
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke up -d --wait backend-smoke frontend-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke run --rm http-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke exec -T backend-smoke python -m app.database
+docker version --format '{{.Server.Version}}'
+docker compose -p bodega-gabriel-validation -f compose.test.yml exec -T postgres-test psql -v ON_ERROR_STOP=1 -U bodega_test -d bodega_test -c "SELECT version FROM schema_migrations ORDER BY version; SELECT count(*) AS pending_image_deletions FROM image_deletion_jobs; SELECT count(*) AS leftover_test_schemas FROM information_schema.schemata WHERE schema_name LIKE 'test_%'; SELECT count(*) AS inconsistent_submissions FROM submissions s WHERE (s.status='CONFIRMED') <> EXISTS(SELECT 1 FROM sales_records r WHERE r.submission_id=s.id); SELECT count(*) AS orphan_sales FROM sales_records r LEFT JOIN submissions s ON s.id=r.submission_id WHERE s.id IS NULL;"
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke ps
+git diff --check
+```
+
+All new writes/deletions during validation target disposable test schemas, uniquely named test buckets or this isolated synthetic smoke dataset. Normal application volumes and unrelated containers were preserved and not migrated/restarted by this review. Isolated services remain running. The outbox captures new deletion transactions and retention operations; it does not reconstruct object keys already lost before migration 007.
+
+## Remaining work by owner
+
+### Gabriel-owned implementation
+
+The requested durable retry defect is closed. No known failure remains in this closure's authorized implementation or executed regressions. The existing incompatible-data upgrade guard remains in effect: if legacy values or required snapshot provenance prevent migration 006, keep the database unchanged and obtain approved remediation. No historical dates or rounded values were invented.
+
+Two broader Gabriel sign-off dependencies remain: formal agreement on `verifiedFields`, and coordination with Luis on the final SQLAlchemy/Alembic architecture. Neither was silently waived or rewritten.
+
+### Explicit team contract approval
+
+Section 4.2's ConfirmLine list omits a verification marker, while Sections 3/4.3 require explicit review of unchanged MEDIUM/UNSCORED values. `verifiedFields` remains enabled end to end. The team must explicitly approve this field as an addendum or supply another official transport contract. Until then, this is an approval-dependent interface, not a reason to remove validation or mark full compliance.
+
+### Luis / Gabriel architecture coordination
+
+The approved architecture names SQLAlchemy models, Alembic migrations, package layout, and Alembic startup/CI commands. The current repository uses psycopg and the existing SQL migration ledger. No persistence-layer rewrite was authorized or performed.
+
+Agree on a forward migration/ORM plan that preserves applied ledger entries and populated rows. The plan must include the operational outbox: declare it in ORM metadata or explicitly protect it from Alembic autogeneration. Never accept an autogenerated DROP that would erase pending image jobs. Baseline the known existing schema, test populated upgrades/reapplication, then coordinate startup and CI changes. Changes to Luis's startup/deployment files require approval.
+
+### Jose - exact integration changes
+
+- `frontend/src/components/SalesCapture.jsx`: replace removed `/api/v1/submissions/manual` with the documented standalone manual form. Generate one UUID v4 per form, collect/validate the rows before submission, POST `/api/v1/manual-entries` with `{submissionId,saleDate,lines}`, keep the ID across retries, and consume ConfirmResponse rather than an extraction draft. Do not restore the removed compatibility endpoint.
+- Keep image/text capture on multipart `/api/v1/extract`; integrate the approved `/review/:submissionId` handoff and exact input notice from Section 9.7. Coordinate successful manual-save refresh/navigation with Luis.
+- `backend/app/inference.py`, `providers.py`, `privacy.py`, and storage integration: finish Claude Messages/tool adapters and configured models, SDK retries disabled, the one-second wait between extraction attempts, fatal handling for non-retryable 4xx, all-null-line dropping, LOW on missing values, and exact unreadable/no-lines messages.
+- Apply the final Section 9.5 masking patterns and image orientation/RGB/JPEG q85/max2048/40-megapixel rules, with the prescribed JPEG content type/key convention. The current generic gateway/older privacy behavior is not approved-Claude compliance.
+- Continue using the storage interface's `bucket` identity and idempotent `delete`. Post-commit deletion retry is now Gabriel's durable outbox; do not replace it with a frontend retry or an in-memory list. Live Claude/R2 credentials and provider-term evidence remain external prerequisites.
+
+### Luis - exact integration changes
+
+- `frontend/src/App.jsx` and the shared router/client: implement the approved `/login`, `/capture`, `/review/:submissionId`, `/drafts`, `/history`, `/analysis` workflow; sessionStorage access-code handling, 401 login redirection and the 90-second extraction timeout. Preserve the existing common-error/204 handling and finish field highlighting from `error.fields`.
+- Pending drafts use GET `/api/v1/submissions`, reopen via GET `/submissions/{id}`, and discard via DELETE `/submissions/{id}` (204). Replace App's obsolete POST `/discard`. `DeleteData.jsx` still calls the removed bulk DELETE `/data`; replace that flow with documented per-submission deletion. Gabriel's SalesHistory already supplies its in-page confirmation/cancel/retry flow.
+- Connect Jose's standalone manual success to history/analysis refresh and route navigation. These shared/capture files remain frozen by the user's instruction; passing mocked tests does not resolve their live integration gap.
+- Complete NFR-718 constant-time access-code checking/rate limiting, CORS/configuration validation, approved logging/retention, static nginx/config.js/frontend deployment and CI/TLS requirements. Coordinate SQLAlchemy/Alembic adoption as above; existing migration 007 and pending jobs must survive that transition.
+
+### Diushen - exact integration changes
+
+- `backend/app/analysis.py`: replace the current `SRS_ALL_HISTORY`/two-item-date policy with asOf minus 27 days through asOf, common logged business dates, missing-item zeros, casefold/collapsed item keys, latest display spelling, minimum seven logged days, last-seven averages, preceding-seven trend rules (including prior=0), and Decimal ceil(average x7) stock quantities. Use half-up display rounding to one decimal and snapshot storage to four decimals.
+- Supply the approved AnalysisResult fields/statuses. Coordinate `backend/app/schemas.py` analysis/guidance response models and the analysis/guidance sections of `main.py`; the current `requiredDays=2`, `NO_SALES`/old estimate schema is not the final contract. Validate asOf against APP_TIMEZONE and reject future dates with 400.
+- Save READY snapshots using `repository.replace_baselines(as_of_date, estimates)`; do not insert undated snapshots or read stale latest snapshots for guidance. The adapter atomically replaces only that owner's requested date. Guidance must recompute, then return 409 with the common error envelope for insufficient history without calling the model.
+- `backend/app/guidance.py` and the LLM adapter: send the top20 items/approved calculated fields, enforce all seven Section 9.6 grounding rules, retain the single 15-second/no-retry request, and return TEMPLATE items with failedRule and the exact stock notice on failure. The current withholding/UNAVAILABLE behavior must be replaced in the teammate implementation.
+- `frontend/src/components/SalesAnalysis.jsx` (or the team's dashboard): consume the final result, display average/trend/suggested stock and seven-day progress/labels, label fallback as Standard advice, and retain the exact stock-check notice. Integrate changes at the owned sections; do not overwrite Gabriel's canonical routes, validation, repository or outbox work wholesale.
+
+No messages were sent to teammates and none of their assigned components were modified in this closure review.
+
+## Files changed in this closure and readiness
+
+Created: `backend/migrations/007_image_deletion_outbox.sql`, `backend/app/image_cleanup.py`, `backend/tests/test_image_cleanup.py`.
+
+Modified: `backend/app/data_lifecycle.py` (atomic enqueue and sweep integration), `backend/app/main.py` (post-commit processing and resilient cleanup task), `backend/tests/test_database.py` (migration count), `backend/tests/test_workflows.py` (storage-interface fixture and durable-job assertion), and this report. All pre-existing uncommitted work, including `.Rhistory`, remains preserved. Migrations 001-006 and frontend/provider/analysis/deployment files were not rewritten.
+
+Branch remains `gabriel/data-state-implementation`; nothing staged, committed, pushed, merged or submitted as a PR. **Gabriel's durable cleanup fix is ready for review. Overall final submission remains pending the stated formal contract approval, architecture coordination and teammate integrations; no 100% project-completion claim is made.**
+
+---
+
+# Previous review (historical results; superseded where updated above)
+
+# Gabriel Marte - final-specification implementation review
+
+Current review: November 5, 2026. This section supersedes all historical source, test, percentage and readiness claims below.
+
+## Authority and approved scope
+
+Read all 45 pages, including Sections 1-13 and both appendices, of `docs/Milestone_3_Final.pdf`: Version 1.0 implementation baseline, October 23, 2026. SHA-256: `9efabad91d280952c282325a46bc1657c60c033b2eb82c4d1d68ac77f025f646`. The PDF is unchanged. Its accepted Section 3 changes now govern over the earlier SRS/drafts. There are three official milestones; "Milestone 4" denotes the current implementation assignment/branch label. No separate official instruction document for that assignment was located; the user task and final PDF govern this review.
+
+Branch remains `gabriel/data-state-implementation`, HEAD `fdd3bfd`. Preserve all prior uncommitted work. No commit, push, merge, cherry-pick, branch switch, PR or persistent-data deletion was performed. Remote branches were inspected read-only after fetch.
+
+User decisions during this review:
+
+- **Approved:** stop an incompatible populated-database upgrade with a clear error and preserve every original record for approved remediation. Do not round old sales or invent snapshot dates.
+- **Not approved:** changes to Jose's capture form or Luis's shared UI integration. Those files were frozen at that decision; their pre-existing modifications remain untouched. Gabriel's review/history components and their integration tests were updated within his ownership.
+- **Still unresolved:** the PDF requires explicit verification but Section 4.2 does not name the existing `verifiedFields` wire extension. Approval or an authoritative replacement contract is pending. Backend review protections remain enabled; this is not claimed to be a settled final contract.
+
+## Implemented corrections
+
+- Added forward migrations 004, 005 and 006; committed migrations 001-003 remain unchanged. The final schema uses quantity NUMERIC(10,2), unit price NUMERIC(12,2), averages NUMERIC(12,4), one-based `line_no`, `item_key`, required snapshot `as_of_date`, owner metadata and submission input/timestamp fields. Sales no longer duplicate the parent sale date. Required snapshot uniqueness, row-count, timestamp, status and confirmed-draft constraints are enforced.
+- Populated upgrades flush deferred triggers before DDL/backfills, preserve record IDs/quantities/prices/order, and perform Unicode casefolding in Python inside the migration transaction. Migration 006 refuses incompatible values or unknown snapshot dates. All migration ledger changes roll back with the DDL on failure. An older checkout also rejects newer unknown ledger versions.
+- Confirmation locks its submission, validates known/unique draft links and uncertain fields, saves all rows atomically and clears the draft. All three open states confirm directly. A confirmed replay returns existing IDs with 200 and ignores invalid/nonexistent lines in its body. Source is derived on the server; the unsupported client `source` field is rejected.
+- Added canonical `POST /manual-entries`, `GET /submissions`, `GET /submissions/{id}`, `DELETE /submissions/{id}`, and `GET /sales`. Removed the unsupported compatibility endpoints `/sales/legacy`, `/submissions/manual`, `/manual-review`, `/discard` and `/data`; no compatibility rule overrides the approved contract.
+- Canonical history returns the documented record fields as an array, uses `start`/`end`, defaults to today minus 27 days through today, rejects reversed/ranges over 366 days, joins the parent date, and emits exact decimal JSON number tokens including line totals. No undocumented pagination envelope or old date aliases remains.
+- Added business-timezone capture/manual date checks, maximum age 365 days, collapsed item labels with a 100-character limit, quantity max 99,999.99, price max 9,999,999.99 and at most two effective decimal places. Validation returns 400 and the common sanitized `error` envelope. New extraction draft IDs are positive integers.
+- Added startup and daily stale/retention sweeps, pending-draft listing, owner-scoped deletion and snapshot invalidation, and atomic per-date baseline replacement. Stale processing uses the 120-second cutoff. Thirty-day cleanup retains confirmed history but removes its raw-input references; expired open submissions and old snapshots are purged.
+- Gabriel's DraftReview now supports direct rejected-state confirmation, integer draft IDs, documented field limits, server-derived source and numeric JSON values. SalesHistory uses canonical filters/arrays and an in-page delete confirmation, cancellation, failed-delete recovery and refresh after success.
+
+## Requirement-by-requirement traceability (Gabriel and adjacent interfaces)
+
+COMPLETE means the behavior in this row has executed verification. PARTIAL/BLOCKED rows are not counted as final compliance. The matrix is scoped to Gabriel and his interfaces; it is not a fabricated project-wide completion percentage.
+
+| Requirement / final PDF reference | Required behavior | Implementation / tests | Status |
+| --- | --- | --- | --- |
+| Data dictionary OWNERS, Sections 7.1-7.2 | UUID, display name, UTC creation timestamp; seeded configured owner | 004; `database.migrate`; PostgreSQL schema/ownership tests | COMPLETE behavior; SQLAlchemy architecture remains below |
+| SUBMISSIONS, Sections 7.1-7.3 | Input type, six statuses, raw references, masked draft, timestamps; confirmedAt on confirmation | 004-006; `repository.py`; all-state and timestamp tests | COMPLETE for persistence |
+| SALES_RECORDS, Sections 7.1-7.2 | Parent FK/cascade; line 1-100 unique; normalized key; numeric types; date from parent | 004-006; repository; raw SQL/FK/count/constraint and maximum-total tests | COMPLETE |
+| BASELINE_ESTIMATES, Sections 7.1-7.2 | Required asOf, item identity, unique owner/date/item, exact four-decimal snapshots | 004-006; `data_lifecycle.replace_baselines`; snapshot replacement/rollback tests | COMPLETE persistence; calculation caller integration blocked below |
+| Migrations, Sections 7 and 8.5 | Safe initialization and populated upgrade, no historical data loss | `database.py`; upgrade, refusal, reapplication and ledger/data-preservation regressions | COMPLETE SQL upgrade behavior; Alembic architecture remains below |
+| FR-104, Sections 4.2, 5.4, SD-04 | Atomic standalone manual entry with client UUID v4; 201 then 200 replay; no AI | `main.final_manual`, `data_lifecycle.manual_entry`; canonical API tests and live HTTP smoke | COMPLETE backend; capture UI BLOCKED |
+| FR-202, Section 5.4 | Finite signed/ranged numbers, two decimals, nonblank collapsed label <=100 | `ConfirmLine`, `DraftReview`; backend invalid-input and UI tests | COMPLETE for confirmation/review |
+| FR-203 | Edit and remove draft rows before confirm | `DraftReview`; interaction regressions | COMPLETE |
+| FR-204 | Empty/invalid confirmation rejected atomically with field errors | common error handler, `ConfirmRequest`, repository transaction; rollback/UI tests | COMPLETE |
+| FR-207 | HIGH still requires owner confirmation | repository lifecycle + DraftReview; confidence boundary/review tests | COMPLETE at data/review boundary |
+| FR-208 | MEDIUM/UNSCORED require edit or explicit verification | repository and DraftReview; equivalent-decimal and uncertain-field regressions | PARTIAL: verification wire extension requires decision |
+| FR-209 | LOW fields blank and required before confirm | normalization and DraftReview; confidence/required-field tests | COMPLETE for LOW-band input; provider/null-value banding is Jose integration |
+| FR-211 / state diagram, Section 5.6 | Recover stale UPLOADED/CLASSIFYING after 120 seconds | `mark_stale`, pending list, startup sweep; fixed-clock stale tests | COMPLETE for Gabriel's recovery boundary |
+| FR-215, Section 7.4 | Retain input 30 days; clear draft on confirmation; remove expired references | lifecycle sweep, repository, storage retention setting; retention and real MinIO tests | PARTIAL: post-delete orphan retry remains unresolved |
+| FR-216 | List/reopen pending drafts, open states only/newest first | pending/detail endpoints; canonical API/HTTP tests | COMPLETE backend; routed pending page BLOCKED |
+| FR-301 | Only confirmed rows become persistent history; derived source | repository, manual endpoint, database triggers; persistence/source tests | COMPLETE |
+| FR-302 | Locked transaction, rollback, no duplicate/repeated/concurrent confirmation | repository; PostgreSQL concurrency, injected failures, ten forced-process restarts | COMPLETE |
+| FR-303 / Section 4.2 | Canonical record array, numeric values and lineTotal; start/end default28/max366; sort date desc/line | `final_sales`, `public_record`, exact JSON renderer, SalesHistory; boundary and HTTP tests | COMPLETE |
+| FR-304 / Section 7.4 | Delete one submission, cascade rows, invalidate owner snapshots, delete image after commit | `delete_submission`, `delete_one`, SalesHistory; owner-scope/cascade/MinIO/cancel/failure tests | PARTIAL: durable retry after storage failure not complete |
+| Snapshot method contract, Section 5.4 | Replace only requested owner's requested date atomically | `repository.replace_baselines`, `data_lifecycle.py`; two-date uniqueness and rollback tests | COMPLETE adapter; Diushen must call it |
+| State diagram, Section 5.6 | Exactly six states; direct open->CONFIRMED; terminal repeat; no invented manual-review transition | 006, lifecycle map, repository, UI; all 36 database state pairs | COMPLETE |
+| NFR-725 | No partial/lost/duplicate confirmed records across ten forced restarts | `test_ten_backend_process_restarts_during_confirmation` | COMPLETE executed test-server scenario |
+| REST errors, Section 4.2 | `{error:{code,message,fields}}`; validation 400; no raw input | canonical handlers; schema/HTTP/validation/privacy regressions | COMPLETE for tested data-layer failures; shared security/logging requirements remain below |
+| Diagram/source consistency, Section 8.6 | Matching Mermaid source and class/module architecture | Final PDF read completely; repository still lacks matching .mmd sources and required ORM/Alembic package structure | INCOMPLETE; architecture integration needed |
+
+## Fresh execution evidence
+
+Final full backend: **226 passed**, no failures/skips, **83.30 seconds**, one existing Starlette/httpx TestClient deprecation warning. The final two added tests cover exact maximum-value JSON totals and the absence of undocumented capture/history endpoints. Real 30-second x2 extraction and 15-second guidance timeout trials and ten spawned test-server crashes remain in the full suite. Providers are stubbed; PostgreSQL and MinIO are real isolated services. These tests do not establish live Claude/R2 integration or final analysis/guidance compliance.
+
+Final frontend: **30 passed**, 3 files, **1.75 seconds**; ESLint exit 0; Vite production build exit 0, 22 modules, **145 ms**. The three new history tests cover cancellation, confirmed delete/refresh and failed-delete retry. Existing capture/shared-shell component tests use mocks; their passing results do not prove compatibility with the removed legacy endpoints.
+
+Docker Engine 29.9.2 connectivity passed. Both normal and isolated Compose configurations passed. Isolated PostgreSQL and backend are healthy; frontend and MinIO are running. Live HTTP smoke passed frontend/proxy, canonical manual entry, ignored replay body, persisted confirmed data, exact decimal history, authentication, common error envelope, pending listing and synthetic submission deletion. The smoke script also keeps existing teammate-analysis regression checks; those old SRS checks are explicitly not final-policy compliance evidence.
+
+The isolated populated HTTP database upgraded successfully through **001-006** and explicit migration reapplication exited 0. Inspection found **zero leftover test schemas**, **zero inconsistent confirmed/record relationships**, one-based `line_no`, no sales `sale_date` column, quantity precision/scale **10/2**, price **12/2**. Incompatible legacy fixtures fail and preserve their original sales, snapshots and migration ledger. No application volumes or unrelated containers were removed or reset. Isolated test services remain running.
+
+Exact commands from the repository root:
+
+```powershell
+docker compose config --quiet
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke config --quiet
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke build backend-tests backend-smoke http-smoke frontend-checks frontend-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm backend-tests
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm --no-deps frontend-checks
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke up -d --wait backend-smoke frontend-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke run --rm http-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke exec -T backend-smoke python -m app.database
+docker compose -p bodega-gabriel-validation -f compose.test.yml exec -T postgres-test psql -v ON_ERROR_STOP=1 -U bodega_test -d bodega_test -c "SELECT version FROM schema_migrations ORDER BY version; SELECT count(*) AS leftover_test_schemas FROM information_schema.schemata WHERE schema_name LIKE 'test_%'; SELECT count(*) AS inconsistent_submissions FROM submissions s WHERE (s.status='CONFIRMED') <> EXISTS(SELECT 1 FROM sales_records r WHERE r.submission_id=s.id); SELECT column_name,data_type,numeric_precision,numeric_scale FROM information_schema.columns WHERE table_schema='public' AND table_name='sales_records' ORDER BY ordinal_position;"
+git diff --check
+```
+
+The temporary PDF parser ran in a disposable container, read all 45 pages, and did not change dependencies in the repository or modify the PDF. Initial intermediate failures (deferred-trigger DDL, duplicate local constraint, outdated old-contract fixtures, one test Unicode encoding issue and a standalone smoke import) were corrected; do not treat earlier failed or older passing runs as final results.
+
+## Remaining discrepancies and required decisions
+
+1. **Verification contract (team decision):** `verifiedFields` is still required by the server for unchanged uncertain values. The final request table omits the field while the review requirement needs explicit verification. The user was asked to approve an addendum or supply the official transport mechanism; no answer has been received. Do not silently remove backend review protection or certify this extension as approved.
+2. **Capture/shared UI integration (explicitly not authorized):** Jose's `SalesCapture.jsx` still uses the removed `/submissions/manual`; Luis's App/shared deletion integration still uses removed `/discard` or `/data` paths. The final manual page, pending route and shared routing/auth behavior need their owners' changes. Those workflows can now receive errors; the strict backend does not preserve contradictory endpoints to conceal this. Gabriel's own history/review components use the canonical contract. No capture/shared-shell code was changed after the user's refusal.
+3. **Analysis/guidance (Diushen):** local code still calculates the old all-history/two-date baseline and withholds guidance on failure. Sections 3, 5.5, 9.6 now require 7 logged days in a 28-day window, zero filling, trend/stock calculations, snapshot replacement, top20 evidence, seven grounding rules and TEMPLATE fallback. The adapter is ready, but the teammate implementation/endpoint/response schema must be integrated. Do not count old analysis tests as proof of those requirements.
+4. **Provider/privacy (Jose):** final Claude SDK/tool contracts, one-second retry delay/fatal-4xx policy, exact masking pattern, null-value banding, no-lines messages, resized/oriented JPEG sanitization and exact capture notice are not fully integrated. Existing generic gateway and old privacy functions remain earlier-session work. Live Claude credentials, R2 configuration and provider-term review are external prerequisites.
+5. **Durable post-delete image retry (Gabriel/storage integration):** deletion commits the database first, as required. A failed subsequent object delete is logged, but the deleted row no longer supplies its key to the next database purge. A durable retry mechanism is still needed. Approve an operational outbox/queue or coordinate an equivalent safe bucket reconciliation mechanism before accepting FR-304 as fully complete. Retention failures on still-existing rows remain retryable because their keys stay in the transactionally preserved rows.
+6. **ORM/migration/deployment integration (Gabriel with Luis):** the final architecture explicitly names SQLAlchemy/Alembic and an Alembic startup/CI path; the preserved project uses psycopg plus an ordered SQL ledger. Its storage behavior and upgrades are tested, but that architectural discrepancy is not waived. Coordinate the migration-tool/ORM and startup integration; no speculative rewrite of committed migrations or teammate Docker/CI work was performed in this phase.
+7. **Historical remediation (approved stop policy):** any real database failing 006 must remain untouched until authoritative snapshot dates and a non-lossy plan for incompatible historical values are supplied. Do not delete snapshots, round old sales, fabricate asOf dates or bypass the guard. Successful upgrade of compatible data does not imply every populated database can be upgraded without this review.
+8. **Shared infrastructure/security and final acceptance:** rate limiting/constant-time auth, final logging schema/retention, supported browser/routed page checks, deployment/TLS, benchmark extraction quality and performance/usability acceptance still need the responsible owners and their environments. Do not alter those team features without approval or claim those NFRs passed.
+
+There is no longer a source-document approval conflict over the seven-day formula or 30-day retention: the October 23 PDF explicitly approves both. Remaining questions are implementation/integration and the verification-wire omission, not permission to keep the earlier SRS policy.
+
+## Files and Git scope
+
+Current Gabriel work is in `backend/app/database.py`, `repository.py`, `main.py` (data/capture-history contracts), `schemas.py` (snapshot input), `lifecycle.py`, `clock.py`, `data_lifecycle.py`, `seed.py`; migrations `004_baseline_v1.sql`, `005_final_integrity.sql`, `006_strict_final_schema.sql`; backend data/final-contract/review/workflow/smoke tests; Gabriel's `DraftReview.jsx`, `SalesHistory.jsx`, their review/history-deletion tests and only the history case of `Workflow.test.jsx`; and this documentation. Earlier uncommitted files remain prior-session work; the final Git status distinguishes tracked modifications and new files. `.Rhistory` is untouched. The shared capture, App, analysis, provider and infrastructure files already had earlier modifications; they were preserved and not rewritten following the user's restriction.
+
+`git diff --check` passes. Nothing staged. No commit, push, merge, force-push or pull request. **Readiness: tested Gabriel storage/API changes are ready for review, but Gabriel's complete final submission is NOT certified ready while the listed contract and integration gaps remain. No 100% claim or invented completion percentage is made.**
+
+---
+
+# Historical implementation notes (superseded by the current review above)
+
+## Current Gabriel review ? November 5, 2026
+
+This section supersedes historical verification and readiness claims below. There are three official milestones; ?Milestone 4? is used only as the user's implementation-work label / historical API-contract branch name.
+
+### Scope and checkout findings
+
+- Current branch: `gabriel/data-state-implementation`, HEAD `fdd3bfd`. All prior uncommitted implementation work was preserved. No switch, merge, cherry-pick, staging, commit, push, or PR action occurred. Remote references were refreshed with `git fetch origin`; this revealed Diushen's analysis/guidance feature branch, inspected read-only.
+- `004_baseline_v1.sql` is absent from the workspace and refreshed available branches. Only migrations 001?003 can be reviewed or applied. No committed migration was changed, no speculative 004 was created, and no historical records were deleted.
+- The final approved October 23 Milestone 3 document was not found. Available local sources are the older Formal Analysis and Design compilation and October 19 update. Therefore final approved-contract compliance cannot be certified.
+- `uncertain_line()` already exists in `backend/tests/test_database.py`. Unknown/duplicate `draftLineId` rejection, linked-row provenance, uncertain-field review, partial-insert rollback, idempotency and concurrency coverage are already present and pass; these were preserved rather than duplicated or rewritten.
+
+### Corrections completed in this review
+
+1. `backend/app/database.py`: after acquiring the existing advisory migration lock, startup now rejects migration-ledger versions absent from this checkout before applying any SQL scripts. An older application therefore cannot silently operate against a newer baseline schema. The runner preserves the ledger and data and requests the matching application version. Existing migration SQL remains unchanged.
+2. `backend/tests/test_review_regressions.py`: five new real-PostgreSQL cases. One populates confirmed sales and baseline snapshots, simulates a ledger entry named `004_baseline_v1.sql` without inventing its DDL, and proves startup refusal leaves IDs, snapshots and migration timestamps unchanged. Four cases prove equivalent decimal formatting (`1.20` versus `1.2000`) cannot bypass MEDIUM, UNSCORED, unknown or missing confidence verification. Explicit verification then permits confirmation.
+3. This report records fresh evidence and the remaining source/contract blockers. No frontend, provider, analysis, storage or other teammate-owned implementation was changed during this review. The many pre-existing uncommitted files listed by Git remain prior-session work, including `.Rhistory`, which was not edited.
+
+### Fresh verification
+
+| Check | Actual result |
+| --- | --- |
+| Docker connectivity | Engine 29.9.2 available after `docker desktop start`; elevated access is required by this environment. |
+| Backend | **213 passed**, zero failures/skips, **78.84 seconds**, one existing Starlette/httpx deprecation warning. Includes full timeout and forced test-process-restart regressions. |
+| Frontend | **27 passed**, 2 files; **2.19 seconds** suite duration. |
+| ESLint | Exit 0. |
+| Production build | Exit 0, 22 modules, 184 ms. |
+| Compose configurations | Normal and isolated configurations both pass `config --quiet`. |
+| Isolated services | PostgreSQL and backend smoke service healthy; frontend and MinIO running. Frontend/API networking verified by live HTTP smoke; storage tested against real isolated MinIO. |
+| HTTP smoke | Passed frontend/proxy, draft persistence, confirmation/idempotency, exact decimals, authentication, validation contracts, manual capture, current SRS analysis, date filtering and disabled-provider guidance. |
+| Migrations | 001, 002 and 003 applied; explicit reapplication exits 0. Existing populated 001/002 ? 003 upgrade regression passes. Actual 004 upgrade **blocked: file absent**. |
+| Integrity | Zero leftover test schemas, inconsistent submission/record states, or mismatched parent/record sales dates. |
+| Diff | `git diff --check` exits 0; only an existing Git LF/CRLF advisory for the prior test file. Existing files were not reformatted. |
+
+Commands executed from the repository root:
+
+```powershell
+git fetch origin
+docker desktop start
+docker version --format '{{.Server.Version}}'
+docker compose config --quiet
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke config --quiet
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke build backend-tests backend-smoke http-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm backend-tests
+docker compose -p bodega-gabriel-validation -f compose.test.yml run --rm --no-deps frontend-checks
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke up -d --wait backend-smoke frontend-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke run --rm http-smoke
+docker compose -p bodega-gabriel-validation -f compose.test.yml --profile smoke exec -T backend-smoke python -m app.database
+docker compose -p bodega-gabriel-validation -f compose.test.yml exec -T postgres-test psql -v ON_ERROR_STOP=1 -U bodega_test -d bodega_test -c "SELECT version FROM schema_migrations ORDER BY version; SELECT count(*) AS leftover_test_schemas FROM information_schema.schemata WHERE schema_name LIKE 'test_%'; SELECT count(*) AS inconsistent_submissions FROM submissions s WHERE (s.status='CONFIRMED') <> EXISTS(SELECT 1 FROM sales_records r WHERE r.submission_id=s.id); SELECT count(*) AS mismatched_dates FROM sales_records r JOIN submissions s ON s.id=r.submission_id WHERE r.sale_date<>s.sale_date;"
+git diff --check
+```
+
+Initial Docker attempts failed because Desktop was stopped; CLI startup resolved it. Native `npm` attempts were blocked by PowerShell execution policy; the existing Docker frontend runner completed all three checks without changing that policy. Application volumes and unrelated containers were not removed or reset. Tests write only disposable PostgreSQL schemas and uniquely named test storage buckets. Isolated services remain running.
+
+### API and lifecycle assessment / submission blockers
+
+- Available implementation: six states, transactional confirmation (201 first save, 200 idempotent repeat), controlled 409 lifecycle conflicts, private owner-scoped history, atomic baseline writes/latest-per-item reads, guarded deletion/discard, and existing raw-object retention cleanup all retain their passing coverage.
+- Current history contract is `startDate` / `endDate`, optional inclusive bounds, with unbounded defaults plus pagination. It does **not** implement the requested final-contract `start` / `end` names or a default 28-day range. Existing validation errors use sanitized `detail` arrays; business/auth errors retain their prior forms. A universal final error envelope cannot be verified from available documents.
+- Baseline snapshot operations are implemented for the existing schema, but the migration to the requested baseline-v1 schema cannot be reviewed without the actual 004 file. Do not run this older checkout against a database where 004 is already applied; the new guard rejects it safely.
+- Retention/deletion regression tests pass for the available implementation. The exact final approved lifecycle/retention requirements and operational cleanup during prolonged service outages still require the October 23 source and deployment evidence. Passing tests do not establish that missing document's requirements.
+- Required next input: the final October 23 specification and the checkout/path containing `004_baseline_v1.sql`. Then reconcile the API names, default range, error envelope and baseline schema within Gabriel's ownership, preserving existing clients and historical data. Any departure from that final specification requires team approval; this review invents none.
+- **Readiness:** the available implementation passes all executed checks and is suitable for code review. Gabriel's final submission is **not yet certified ready**, because 004 upgrade safety and final API-contract compliance remain unverified. No commit, push, merge or PR was performed.
+
+---
+
 # Gabriel Marte: implementation report
 
 ## 1. Completed responsibilities and evidence

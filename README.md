@@ -2,6 +2,7 @@
 
 Gabriel Marte's data/state, draft-review, and confirmed-history implementation.
 See [the implementation report](docs/GABRIEL_IMPLEMENTATION.md) for the API contract, design decisions, file inventory, validation results, and team integration boundaries.
+See [the November 4 data/lifecycle audit](docs/DATA_STATE_COMPLETION.md) for current changes, fresh validation results, and remaining Milestone 3 blockers.
 
 ## Start locally
 
