@@ -160,7 +160,7 @@ The provider receives calculated evidence only: item name, suggested quantity, a
 | `UNSAFE_MARKUP` | HTML or Markdown characters. |
 | `UNSUPPORTED_CLAIM` | Any word outside a closed vocabulary, or "stock" used other than as advice to check it. |
 
-**The closed vocabulary is the main defence.** Apart from the item's own name, a message may use only about 90 planning words. Prices, profit, weather, competitors and guarantees fail because those words are unavailable, not because a blocklist anticipated them. The list also leaves out negation ("not"), certainty ("will") and stock states ("low", "out"). This trades flexibility for safety: unusual but truthful wording falls back to the template, which is the safe direction.
+**The closed vocabulary is the main defence.** Apart from the item's own name, a message may use only 103 planning and trend words. Prices, profit, weather, competitors and guarantees fail because those words are unavailable, not because a blocklist anticipated them. The list also leaves out negation ("not"), certainty ("will") and stock states ("low", "out"). This trades flexibility for safety: unusual but truthful wording falls back to the template, which is the safe direction.
 
 **Residual limitations.** This reduces risk but does not prove that natural language is true:
 
