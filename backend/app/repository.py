@@ -46,15 +46,34 @@ def _normalize_draft(submission_id, payload):
     return {**payload, 'lines': lines}
 
 
-def create_submission(sale_date, *, image_key=None, draft_payload=None):
+def create_submission(sale_date, *, image_key=None, draft_payload=None, input_type=None, masked_text=None):
     from psycopg.types.json import Jsonb
     submission_id = uuid4()
     draft_payload = _normalize_draft(submission_id, draft_payload)
     with connect() as conn:
         conn.execute("INSERT INTO owners(id) VALUES (%s) ON CONFLICT DO NOTHING", (owner_id(),))
-        conn.execute("INSERT INTO submissions(id,owner_id,sale_date,image_key,draft_payload) VALUES (%s,%s,%s,%s,%s)",
-                     (submission_id, owner_id(), sale_date, image_key, Jsonb(draft_payload) if draft_payload is not None else None))
+        columns = {"id": submission_id, "owner_id": owner_id(), "sale_date": sale_date, "image_key": image_key,
+                   "draft_payload": Jsonb(draft_payload) if draft_payload is not None else None}
+        # Capture columns (migration 004) are written only when supplied, so callers that predate
+        # them keep working against an older schema (see the migration-upgrade test).
+        if input_type is not None:
+            columns["input_type"] = input_type
+        if masked_text is not None:
+            columns["masked_text"] = masked_text
+        conn.execute(f"INSERT INTO submissions({','.join(columns)}) VALUES ({','.join(['%s'] * len(columns))})",
+                     tuple(columns.values()))
     return submission_id
+
+
+def get_capture_input(submission_id):
+    """José's ingestion boundary: how a submission arrived and its stored (sanitized/masked) input."""
+    with connect() as conn:
+        conn.row_factory = dict_row
+        row = conn.execute("SELECT input_type, image_key, masked_text FROM submissions WHERE id=%s AND owner_id=%s",
+                           (submission_id, owner_id())).fetchone()
+        if row is None:
+            raise HTTPException(404, "Submission not found")
+        return row
 
 
 def update_status(submission_id, status, *, draft_payload=None):
@@ -75,7 +94,8 @@ def get_submission(submission_id):
             raise HTTPException(404, "Submission not found")
         draft = _normalize_draft(row["id"], row["draft_payload"])
         return {"submissionId": row["id"], "saleDate": row["sale_date"], "status": row["status"],
-                "lines": (draft or {}).get("lines", []), "manualEntry": row["status"] in ('AI_UNAVAILABLE', 'REJECTED')}
+                "lines": (draft or {}).get("lines", []), "manualEntry": row["status"] in ('AI_UNAVAILABLE', 'REJECTED'),
+                "message": (draft or {}).get("message")}
 
 
 def _same_value(left, right, field):

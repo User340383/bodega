@@ -13,7 +13,7 @@ docker compose up --build -d --wait
 
 Open http://localhost:5173. The development owner access code is `local-development-code-123`, matching the existing Compose configuration. API documentation is at http://localhost:8000/docs. Schema migrations run automatically during backend startup.
 
-The ingestion UI is pending team integration. To try draft review with explicitly synthetic local data:
+To capture sales, use **Capture sales** at the top of the page: choose **Text** and paste lines such as `Bread 3 1.50`, or upload a JPEG/PNG photo. With the default `AI_PROVIDER=mock` no paid key is needed; see [the ingestion report](docs/JOSE_IMPLEMENTATION.md) for privacy controls, timeouts and how to enable real Claude extraction. To try draft review with explicitly synthetic local data instead:
 
 ```sh
 docker compose exec backend python -m app.seed
