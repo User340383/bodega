@@ -1,0 +1,40 @@
+﻿name: Bodega CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "jose/**"
+      - "gabriel/**"
+      - "diushen/**"
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run backend tests
+        run: docker compose -f compose.test.yml run --build --rm backend-tests
+
+  frontend-checks:
+    name: Frontend Tests, Lint and Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run frontend checks
+        run: docker compose -f compose.test.yml run --build --rm frontend-checks
