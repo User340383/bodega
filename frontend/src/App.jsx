@@ -1,10 +1,11 @@
 import { useCallback, useState } from 'react'
 import DraftReview from './components/DraftReview'
 import ResultsDashboard from './components/ResultsDashboard'
+import SalesCapture from './components/SalesCapture'
 import SalesHistory from './components/SalesHistory'
 import './App.css'
 
-// Minimal mount point until Luis supplies the shared shell/client and José the capture UI.
+// Minimal mount point until Luis supplies the shared shell/client.
 function App() {
   const [code, setCode] = useState('')
   const [accessCode, setAccessCode] = useState('')
@@ -15,8 +16,10 @@ function App() {
   const [revision, setRevision] = useState(0)
   const [draftVersion, setDraftVersion] = useState(0)
   const request = useCallback(async (path, options = {}) => {
+    // FormData (photo/text capture) must let the browser set its own multipart boundary.
+    const json = !(options.body instanceof FormData)
     const response = await fetch(path, { ...options, headers: {
-      Authorization: `Bearer ${accessCode}`, 'Content-Type': 'application/json', ...options.headers,
+      Authorization: `Bearer ${accessCode}`, ...(json && { 'Content-Type': 'application/json' }), ...options.headers,
     } })
     const result = await response.json()
     if (!response.ok) {
@@ -36,14 +39,19 @@ function App() {
   }
 
   return <main>
-    <header><h1>Bodega</h1><p>Review sales and browse confirmed history.</p></header>
+    <header><h1>Bodega</h1><p>Capture, review and browse your sales.</p></header>
     <form onSubmit={event => { event.preventDefault(); setDraft(null); setAccessCode(code); setRevision(revision + 1) }}>
       <label>Owner access code <input type="password" required value={code} onChange={event => setCode(event.target.value)} /></label>
       <button>Connect</button>
     </form>
     {accessCode && <>
+      <SalesCapture key={`capture:${accessCode}`} request={request} onDraft={captured => {
+        setDraft(captured)
+        setSubmissionId(String(captured.submissionId))
+        setDraftVersion(value => value + 1)
+      }} />
       <section><h2>Open a submission</h2>
-        <p>Enter a submission ID to review previously captured sales. Sales capture is being integrated.</p>
+        <p>Enter a submission ID to reopen a previously captured draft.</p>
         <form onSubmit={openDraft}><label>Submission ID <input required value={submissionId} onChange={event => setSubmissionId(event.target.value)} /></label>
           <button disabled={loading}>{loading ? 'Loading…' : 'Open draft'}</button>
         </form>

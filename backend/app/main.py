@@ -1,6 +1,6 @@
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 from typing import Literal
@@ -24,7 +24,10 @@ from pydantic import BaseModel, Field, field_validator
 from contextlib import asynccontextmanager
 import logging
 import psycopg
-from . import repository
+from . import privacy, repository
+from .ingestion import InferenceService
+from .storage import StorageError, get_object_storage
+from .vision import VisionModel, get_vision_model
 from .analysis import AnalysisResponse, BaselineAnalyzer, IsoDate, resolve_as_of
 from .clock import Clock, get_clock
 from .database import migrate
@@ -137,43 +140,87 @@ def health():
     return {"status": "ok"}
 
 
+def _signed_image_url(storage, image_key):
+    if not image_key:
+        return None
+    try:
+        return storage.get_signed_url(image_key)
+    except StorageError:
+        return None  # The draft is still usable without the preview.
+
+
+def _capture_response(submission_id, storage):
+    """ExtractResponse / SubmissionDetail: Gabriel's draft view plus José's capture inputs."""
+    detail = repository.get_submission(submission_id)
+    capture = repository.get_capture_input(submission_id)
+    return {**detail, "inputType": capture["input_type"], "maskedText": capture["masked_text"],
+            "imageUrl": _signed_image_url(storage, capture["image_key"])}
+
+
+# A sync route: FastAPI runs it on a worker thread, so the up-to-61 s provider wait
+# (30 s, 1 s pause, 30 s) never blocks the event loop.
 @app.post("/api/v1/extract", responses={
     400: {"description": "Invalid extraction input, including missing or malformed form fields"},
+    503: {"description": "The photo could not be stored; nothing was created and no AI call was made"},
     "4XX": {"description": "Input or access error"},
 })
-async def extract(
+def extract(
     saleDate: date = Form(...),
     file: UploadFile | None = File(default=None),
     text: str | None = Form(default=None),
     _: None = Depends(require_owner_access),
+    clock: Clock = Depends(get_clock),
+    model: VisionModel = Depends(get_vision_model),
+    storage=Depends(get_object_storage),
 ):
+    # 1. Validate everything before anything is stored or sent (M3 validateInput).
     if (file is None) == (text is None):
         raise extraction_validation_error(None, "Provide exactly one image file or text input.")
 
+    image = None
     if file is not None:
-        if file.content_type not in ("image/jpeg", "image/png"):
-            raise extraction_validation_error("file", "Only JPEG and PNG images are accepted.")
+        image = file.file.read(privacy.MAX_IMAGE_BYTES + 1)
+        if len(image) > privacy.MAX_IMAGE_BYTES or privacy.detect_image_type(image) is None:
+            raise extraction_validation_error("file", "Choose a JPEG or PNG photo under 10 MB.")
+    else:
+        text = text.strip()
+        if not text or len(text) > privacy.MAX_TEXT_CHARS:
+            raise extraction_validation_error("text", "Text must contain 1-5,000 characters.")
 
-        contents = await file.read(10 * 1024 * 1024 + 1)
-        if len(contents) > 10 * 1024 * 1024:
-            raise extraction_validation_error("file", "Image must not exceed 10 MiB.")
+    today = clock.today()
+    if saleDate > today:
+        raise extraction_validation_error("saleDate", "Sale date cannot be in the future.")
+    if saleDate < today - timedelta(days=365):
+        raise extraction_validation_error("saleDate", "Sale date cannot be more than 365 days ago.")
 
-    elif not text or not text.strip() or len(text) > 5000:
-        raise extraction_validation_error("text", "Text must contain 1-5,000 characters.")
+    service = InferenceService(model)
+    if image is not None:
+        # 2a. Photo: strip metadata, store only the sanitized copy, then create the submission.
+        try:
+            sanitized = privacy.sanitize_image(image)
+        except privacy.InvalidImageError as exc:
+            raise extraction_validation_error("file", str(exc)) from None
+        del image  # The original bytes (with EXIF/GPS) are not kept.
+        try:
+            image_key = storage.put_object(sanitized, "image/jpeg")
+        except StorageError:
+            raise HTTPException(503, "We could not save your photo. Please try again.") from None
+        try:
+            submission_id = repository.create_submission(saleDate, image_key=image_key, input_type="IMAGE")
+        except Exception:
+            try:
+                storage.delete_object(image_key)
+            except StorageError:
+                logging.getLogger(__name__).warning("orphaned image could not be deleted")
+            raise
+        service.extract_from_image(submission_id, sanitized)
+    else:
+        # 2b. Text: mask phones/emails first; only the masked text is stored or sent.
+        masked = privacy.mask_text(text)
+        submission_id = repository.create_submission(saleDate, input_type="TEXT", masked_text=masked)
+        service.extract_from_text(submission_id, masked)
 
-    if saleDate > date.today():
-        raise extraction_validation_error("saleDate", "Sale date cannot be in the future")
-    # Integration boundary only: no AI extraction, raw-input storage or fabricated rows.
-    submission_id = repository.create_submission(saleDate)
-    repository.update_status(submission_id, "CLASSIFYING")
-    repository.update_status(submission_id, "AI_UNAVAILABLE")
-    return {
-        "submissionId": str(submission_id), "status": "AI_UNAVAILABLE",
-        "inputType": "IMAGE" if file is not None else "TEXT",
-        "saleDate": saleDate.isoformat(),
-        "message": "Extraction is not implemented. Enter reviewed sales rows manually.",
-        "manualEntry": True, "imageUrl": None, "maskedText": None, "lines": [],
-    }
+    return _capture_response(submission_id, storage)
 
 
 @app.post("/api/v1/confirm", status_code=status.HTTP_201_CREATED)
@@ -184,8 +231,9 @@ def confirm(request: ConfirmRequest, response: Response, _: None = Depends(requi
 
 
 @app.get("/api/v1/submissions/{submission_id}")
-def submission(submission_id: UUID, _: None = Depends(require_owner_access)):
-    return repository.get_submission(submission_id)
+def submission(submission_id: UUID, _: None = Depends(require_owner_access),
+               storage=Depends(get_object_storage)):
+    return _capture_response(submission_id, storage)
 
 
 @app.post("/api/v1/submissions/{submission_id}/manual-review")

@@ -1,0 +1,20 @@
+.capture-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.capture-tabs button { background: white; color: #235c43; margin: 0; min-width: 6rem; }
+.capture-tabs button.active { background: #235c43; color: white; }
+.capture form label { margin-bottom: .75rem; }
+.capture-input { display: grid; gap: .4rem; margin: .5rem 0 .75rem; }
+.capture textarea { width: 100%; font: inherit; padding: .6rem; border-radius: 5px; border: 1px solid #82968a; resize: vertical; }
+.capture textarea:focus-visible { outline: 3px solid #bb6c1d; outline-offset: 2px; }
+.capture input[type=file] { max-width: 100%; }
+.capture .hint { font-size: .85rem; color: #4f6159; margin: 0; }
+.capture .notice { font-size: .9rem; background: #eef4f8; border-left: 4px solid #2f6db5; padding: .6rem .8rem; border-radius: 4px; }
+.capture-preview { display: block; max-width: min(100%, 420px); max-height: 320px; object-fit: contain; border: 1px solid #d2ddd5; border-radius: 6px; margin-top: .5rem; }
+.capture-loading { display: flex; align-items: center; gap: .6rem; font-weight: 600; }
+.spinner { width: 1.2rem; height: 1.2rem; border: 3px solid #d2ddd5; border-top-color: #235c43; border-radius: 50%; animation: capture-spin .8s linear infinite; flex: none; }
+@keyframes capture-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.capture-outcome { margin-top: 1rem; padding: .75rem 1rem; border-radius: 6px; }
+.capture-outcome.ok { background: #e9f5ec; border: 1px solid #2f8a4c; }
+.capture-outcome.fallback { background: #fff3ce; border: 1px solid #bb6c1d; }
+.capture-outcome p { margin: .3rem 0; }
+.masked-text { white-space: pre-wrap; word-break: break-word; background: white; padding: .5rem; border-radius: 4px; max-height: 12rem; overflow: auto; }

@@ -64,7 +64,7 @@ def counts(sid):
 def test_migration_is_repeatable_and_relationships(db):
     migrate()
     with connect() as conn:
-        assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 3
+        assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 4
         assert conn.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('owners','submissions','sales_records','baseline_estimates')").fetchone()[0] == 4
     with pytest.raises(psycopg.errors.ForeignKeyViolation), connect() as conn:
         conn.execute('INSERT INTO submissions(id,owner_id,sale_date) VALUES (%s,%s,%s)', (uuid4(), uuid4(), date.today()))
@@ -436,7 +436,7 @@ def test_migration_upgrade_preserves_existing_records_and_nonblank_checks(db, mo
         migrate()
         with connect() as conn:
             assert conn.execute('SELECT id FROM sales_records WHERE submission_id=%s', (sid,)).fetchone()[0] == original_ids[0]
-            assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 3
+            assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 4
             conn.execute('UPDATE baseline_estimates SET item_name=%s WHERE id=%s', ('x' * 201, baseline_id))
         assert counts(sid) == ('CONFIRMED', 1)
         other = make_submission()
