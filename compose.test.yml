@@ -22,7 +22,9 @@ services:
         condition: service_healthy
     command: ["python", "-m", "pytest", "-q", "-ra"]
   frontend-checks:
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: dev
     command: ["sh", "-c", "npm run lint && npm test && npm run build"]
 
   backend-smoke:
@@ -42,7 +44,9 @@ services:
       retries: 30
   frontend-smoke:
     profiles: [smoke]
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: dev
     environment:
       BODEGA_API_TARGET: http://backend-smoke:8000
       BODEGA_ALLOWED_HOSTS: frontend-smoke

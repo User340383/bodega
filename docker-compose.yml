@@ -2,6 +2,7 @@ services:
   frontend:
     build:
       context: ./frontend
+      target: dev
     ports:
       - "5173:5173"
     environment:
@@ -34,6 +35,7 @@ services:
       OWNER_ID: 00000000-0000-4000-8000-000000000001
       OWNER_DISPLAY_NAME: Local Owner
       APP_TIMEZONE: America/Santo_Domingo
+      FRONTEND_URL: http://localhost:5173
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s

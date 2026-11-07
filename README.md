@@ -1,7 +1,13 @@
 ﻿# Bodega
 
-Gabriel Marte's data/state, draft-review, and confirmed-history implementation.
-See [the implementation report](docs/GABRIEL_IMPLEMENTATION.md) for the API contract, design decisions, file inventory, validation results, and team integration boundaries.
+A web app for small shops to capture sales from a photo or text, confirm them, and get restocking estimates. Built for COMP 425, Team Bodega. Each member's report lists the details of their part:
+
+- [Luis Heyaime](docs/LUIS_IMPLEMENTATION.md): application shell, Docker, CI/CD, Render deployment
+- [José Javier Otazu](docs/JOSE_IMPLEMENTATION.md): AI ingestion and capture
+- [Diushen Cabrera](docs/DIUSHEN_IMPLEMENTATION.md): analysis, guidance and results dashboard
+- [Gabriel Marte](docs/GABRIEL_IMPLEMENTATION.md): data and state, draft review, sales history
+
+The app's pages are `/login`, `/capture`, `/review/:submissionId`, `/drafts`, `/history` and `/analysis`. Production runs on Render (see `render.yaml` and the deployment section of Luis's report); code reaches production only through the GitHub Actions deploy job after every check passes on `main`.
 
 ## Start locally
 
@@ -19,7 +25,7 @@ To capture sales, use **Capture sales** at the top of the page: choose **Text** 
 docker compose exec backend python -m app.seed
 ```
 
-Connect in the frontend and open submission `10000000-0000-4000-8000-000000000003`. Verify or edit its highlighted unit price, then confirm. The confirmed ledger refreshes automatically. Seeding is optional and never runs at startup.
+Sign in, go to **Pending drafts**, and open submission `10000000-0000-4000-8000-000000000003` by ID. Verify or edit its highlighted unit price, then confirm; the sale then appears under **History**. Seeding is optional and never runs at startup.
 
 ## Results dashboard
 
