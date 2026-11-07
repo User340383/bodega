@@ -52,9 +52,16 @@ def create_submission(sale_date, *, image_key=None, draft_payload=None, input_ty
     draft_payload = _normalize_draft(submission_id, draft_payload)
     with connect() as conn:
         conn.execute("INSERT INTO owners(id) VALUES (%s) ON CONFLICT DO NOTHING", (owner_id(),))
-        conn.execute("INSERT INTO submissions(id,owner_id,sale_date,image_key,draft_payload,input_type,masked_text) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                     (submission_id, owner_id(), sale_date, image_key, Jsonb(draft_payload) if draft_payload is not None else None,
-                      input_type, masked_text))
+        columns = {"id": submission_id, "owner_id": owner_id(), "sale_date": sale_date, "image_key": image_key,
+                   "draft_payload": Jsonb(draft_payload) if draft_payload is not None else None}
+        # Capture columns (migration 004) are written only when supplied, so callers that predate
+        # them keep working against an older schema (see the migration-upgrade test).
+        if input_type is not None:
+            columns["input_type"] = input_type
+        if masked_text is not None:
+            columns["masked_text"] = masked_text
+        conn.execute(f"INSERT INTO submissions({','.join(columns)}) VALUES ({','.join(['%s'] * len(columns))})",
+                     tuple(columns.values()))
     return submission_id
 
 

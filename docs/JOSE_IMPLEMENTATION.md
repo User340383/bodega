@@ -70,7 +70,19 @@ docker compose -f compose.test.yml run --rm --no-deps frontend-checks
 
 ## 6. Verification status
 
-The code was written on a machine without Python, Node or Docker, so **the new tests have not been executed yet**. Run the three test commands above (or let CI run them once Luis adds the workflow) before merging, and fix anything they report.
+Executed November 6, 2026 (Docker Desktop, `compose.test.yml`):
+
+| Check | Result |
+| --- | --- |
+| Backend suite (all teams, isolated PostgreSQL) | **286 passed** |
+| Frontend ESLint, Vitest (56 tests incl. 10 capture tests), Vite production build | **All passed** |
+| HTTP smoke stack through the Vite proxy | **PASS** (extraction 400, AI_UNAVAILABLE fallback, confirmation, idempotency) |
+| Full `docker compose` app, photo upload | Stored in MinIO (bucket auto-created), `NEEDS_VERIFICATION`, stored copy has no EXIF; signed preview URL returns HTTP 200 `image/jpeg` from the host browser side |
+| Full app, typed text | `Call 809-555-1234` stored and sent as `Call [removed]`; `Bread 3 1.50` all HIGH, `Milk 2` with LOW (blank) unit price |
+
+The first backend run found one failure: Gabriel's migration-upgrade test inserts submissions into a pre-004 schema, and `create_submission` always named the new columns. It now writes `input_type`/`masked_text` only when supplied; the rerun passed. Real Claude extraction was not exercised (no API key in this environment); its behaviour is covered only through the provider-error mapping and the mock.
+
+Business date note, observed while testing: in the evening in Santo Domingo the UTC container date is already "tomorrow", and extraction correctly rejects that date because it uses `APP_TIMEZONE`.
 
 ## 7. Open items for the team
 
