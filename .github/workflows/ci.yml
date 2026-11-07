@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run backend tests
         run: docker compose -f compose.test.yml run --build --rm backend-tests
@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run frontend checks
         run: docker compose -f compose.test.yml run --build --rm frontend-checks
