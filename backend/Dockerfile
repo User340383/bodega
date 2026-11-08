@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY migrations ./migrations
 COPY tests ./tests
+COPY benchmarks ./benchmarks
 COPY pytest.ini ./pytest.ini
 
 ENV PORT=8000
