@@ -1,5 +1,7 @@
 ﻿name: Bodega CI
 
+# M3 8.5: runs on every pull request to main and every push. Tests and image builds run everywhere;
+# the deploy job runs only for pushes to main, and only after every other job has passed.
 on:
   push:
     branches:
@@ -15,6 +17,11 @@ on:
 
 permissions:
   contents: read
+
+# A newer push to the same branch or PR cancels the older run (never a deploy in progress on main).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   backend-tests:
@@ -38,3 +45,50 @@ jobs:
 
       - name: Run frontend checks
         run: docker compose -f compose.test.yml run --build --rm frontend-checks
+
+  production-images:
+    name: Production Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # Proves the Dockerfiles Render builds still work (Render builds its own copy).
+      - name: Build backend image
+        run: docker build -t bodega-backend:ci ./backend
+
+      - name: Build frontend image (nginx)
+        run: docker build -t bodega-frontend:ci ./frontend
+
+      - name: Smoke-test the frontend image
+        run: |
+          docker run -d --name web -e PORT=8080 -e API_BASE_URL=api.example.com -p 8080:8080 bodega-frontend:ci
+          for attempt in $(seq 1 20); do curl -fsS http://localhost:8080/ >/dev/null && break; sleep 1; done
+          curl -fsS http://localhost:8080/capture | grep -q '<div id="root">'
+          curl -fsS http://localhost:8080/config.js | grep -q "apiBaseUrl: 'https://api.example.com'"
+          docker rm -f web
+
+  deploy:
+    name: Deploy to Render
+    needs: [backend-tests, frontend-checks, production-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Trigger Render deploy hooks
+        env:
+          BACKEND_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+          FRONTEND_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}
+        run: |
+          if [ -z "$BACKEND_HOOK" ] || [ -z "$FRONTEND_HOOK" ]; then
+            echo "::warning::Render deploy hooks are not configured; skipping deploy. See docs/LUIS_IMPLEMENTATION.md."
+            exit 0
+          fi
+          curl -fsS -X POST "$BACKEND_HOOK" > /dev/null
+          curl -fsS -X POST "$FRONTEND_HOOK" > /dev/null
+          echo "Deploy triggered for backend and frontend."

@@ -1,5 +1,4 @@
 
-import os
 from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
@@ -10,7 +9,6 @@ from fastapi import (
     FastAPI,
     File,
     Form,
-    Header,
     HTTPException,
     UploadFile,
     status,
@@ -19,6 +17,7 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from contextlib import asynccontextmanager
@@ -33,14 +32,24 @@ from .clock import Clock, get_clock
 from .database import migrate
 from .guidance import GuidanceEngine, GuidanceResponse
 from .llm import WordingProvider, get_wording_provider
+from .security import FailedAttemptLimiter, allowed_origins, check_required_settings, require_owner_access
 
 @asynccontextmanager
 async def lifespan(app):
+    check_required_settings()
+    app.state.access_limiter = FailedAttemptLimiter()
     migrate()
     yield
 
 
 app = FastAPI(title="Bodega API", version="0.1.0", lifespan=lifespan)
+# Production serves the SPA from its own Render service, so FRONTEND_URL is the only allowed origin.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins(),
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.exception_handler(psycopg.Error)
@@ -63,21 +72,6 @@ def extraction_validation_error(field, message):
         "loc": ["body", field] if field else ["body"],
         "msg": message, "type": "value_error",
     }])
-
-
-def require_owner_access(
-    authorization: str | None = Header(default=None),
-):
-    expected_code = os.getenv("APP_ACCESS_CODE")
-
-    if not expected_code:
-        raise HTTPException(
-            status_code=503,
-            detail="API access code is not configured.",
-        )
-
-    if authorization != f"Bearer {expected_code}":
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 class ConfidenceBands(BaseModel):
