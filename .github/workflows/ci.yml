@@ -60,6 +60,12 @@ jobs:
       - name: Ruff
         run: pipx run ruff==0.17.4 check backend
 
+      # NFR-718 regression guard: trusting every proxy header lets clients bypass the rate limit.
+      - name: Backend does not trust spoofable proxy headers
+        run: |
+          grep '^CMD' backend/Dockerfile | grep -q -- '--no-proxy-headers'
+          ! grep '^CMD' backend/Dockerfile | grep -q -e 'forwarded-allow-ips' -e ' --proxy-headers'
+
       # NFR-712: an automated secret scan of the code and its history must report 0 findings.
       - name: Gitleaks
         run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.21.2 git /repo --redact --no-banner

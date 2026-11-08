@@ -99,7 +99,10 @@ def test_distinct_clients_behind_the_proxy_are_counted_separately(client, monkey
 def test_container_does_not_trust_every_forwarded_header():
     """uvicorn with --forwarded-allow-ips='*' takes the left-most (spoofable) X-Forwarded-For entry."""
     from pathlib import Path
-    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+    path = Path(__file__).resolve().parents[1] / "Dockerfile"
+    if not path.exists():
+        pytest.skip("Dockerfile is not inside the image; CI's static-checks job runs the same check")
+    dockerfile = path.read_text(encoding="utf-8")
     command = next(line for line in dockerfile.splitlines() if line.startswith("CMD"))
     assert "forwarded-allow-ips" not in command and "--proxy-headers" not in command
     assert "--no-proxy-headers" in command
