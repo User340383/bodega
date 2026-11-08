@@ -7,17 +7,17 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .analysis import AnalysisResponse, ItemEstimate, Trend, normalize_item
-from .grounding import ALLOWED_WORDS, MAX_MESSAGE_CHARS, check_grounding
+from .grounding import ALLOWED_WORDS, MAX_MESSAGE_CHARS, MAX_MESSAGE_WORDS, check_grounding
 from .llm import ItemEvidence, ProviderNotConfigured, WordingProvider, WordingRequest
 
 logger = logging.getLogger(__name__)
 
 PROVIDER_TIMEOUT_SECONDS = 15.0
 
-STOCK_NOTICE = (
-    "These are sales-based planning suggestions, not low-stock alerts. Bodega does not record "
-    "current inventory, so check your actual stock before ordering."
-)
+# M3 9.7 fixed notices (exact text).
+STOCK_NOTICE = ("These numbers come only from the sales you logged. "
+                "Check what you already have in stock before you buy.")
+TEMPLATE_LABEL = "Standard advice"
 
 # Fixed text only: provider output and exception details never reach a response or a log.
 FAILURE_REASONS = {
@@ -40,11 +40,12 @@ FAILURE_REASONS = {
     "UNSUPPORTED_CLAIM": "The provider made a claim outside the sales evidence, so its wording was rejected.",
 }
 
-_TREND_SENTENCES = {
-    "UP": "Sales are trending up compared with the previous 7 logged dates.",
-    "DOWN": "Sales are trending down compared with the previous 7 logged dates.",
-    "STABLE": "Sales are stable compared with the previous 7 logged dates.",
-    "INSUFFICIENT_DATA": "There is not enough history for a trend yet.",
+# M3 9.6 trendPhrase.
+TREND_PHRASES = {
+    "UP": "sales are rising",
+    "DOWN": "sales are slowing",
+    "STABLE": "sales are steady",
+    "INSUFFICIENT_DATA": "not enough history for a trend yet",
 }
 
 
@@ -62,6 +63,7 @@ class GuidanceResponse(BaseModel):
     status: Literal["READY", "INSUFFICIENT_HISTORY"]
     items: list[GuidanceItem]
     source: Literal["AI_WORDED", "TEMPLATE"]
+    sourceLabel: str | None  # "Standard advice" whenever source is TEMPLATE (M3 9.7).
     groundingPassed: bool  # Describes the provider's own output, never the fallback.
     failedRule: str | None
     failureReason: str | None
@@ -71,13 +73,10 @@ class GuidanceResponse(BaseModel):
 
 
 def template_message(estimate: ItemEstimate) -> str:
-    """Fallback wording, built exclusively from validated backend figures."""
-    trend = _TREND_SENTENCES[estimate.trend]
-    if estimate.suggestedQty == "0":
-        return f"{estimate.itemName}: no confirmed sales in the latest 7 logged dates, so no quantity is suggested. {trend}"
-    about = "about " if estimate.currentAverageRounded else ""
-    return (f"{estimate.itemName}: plan for {estimate.suggestedQty} units to cover 7 logged sales dates. "
-            f"Average is {about}{estimate.currentAverage} per logged date. {trend}")
+    """M3 9.6 fallback template, built exclusively from validated backend figures."""
+    return (f"{estimate.itemName}: you sold about {estimate.currentAverageDisplay} per logged day over your "
+            f"last 7 logged days ({TREND_PHRASES[estimate.trend]}). Consider having {estimate.suggestedQty} "
+            f"on hand for your next 7 selling days.")
 
 
 def _instructions() -> str:
@@ -86,9 +85,12 @@ def _instructions() -> str:
         'Reply with only JSON: {"items": [{"itemName": "...", "suggestedQty": "...", "message": "..."}]}.\n'
         "Include every item exactly once. Copy itemName and suggestedQty exactly.\n"
         "Each message must contain the item name and its suggestedQty, for example "
-        '"Bread: plan 28 units to cover 7 logged sales dates."\n'
-        "Use only numbers from that item's evidence. Describe only that item's trend value.\n"
-        f"Keep each message under {MAX_MESSAGE_CHARS} characters. Do not use markup.\n"
+        '"Bread: you sold about 4.0 per logged day over your last 7 logged days. '
+        'Consider having 28 on hand for your next 7 selling days."\n'
+        "Use only numbers from that item's evidence; write the average as averageOneDecimal. "
+        "Describe only that item's trend value.\n"
+        f"Keep each message under {MAX_MESSAGE_WORDS} words and {MAX_MESSAGE_CHARS} characters. "
+        "Do not use markup.\n"
         "Other than the item name, use only these words: " + " ".join(sorted(ALLOWED_WORDS)) + "\n"
         "Never mention prices, profit, weather, competitors, guarantees, or whether stock is low."
     )
@@ -108,7 +110,7 @@ class GuidanceEngine:
             itemName=estimate.itemName, suggestedQty=estimate.suggestedQty,
             currentAverage=estimate.currentAverage, previousAverage=estimate.previousAverage,
             trend=estimate.trend, changePercent=estimate.changePercent,
-            windowLoggedDays=estimate.windowLoggedDays,
+            windowLoggedDays=estimate.windowLoggedDays, averageOneDecimal=estimate.currentAverageDisplay,
         ) for estimate in eligible)
 
         raw, rule = self._call_provider(WordingRequest(_instructions(), evidence))
@@ -150,7 +152,8 @@ class GuidanceEngine:
     def _response(self, analysis, status, items, rule, *, provider_called) -> GuidanceResponse:
         return GuidanceResponse(
             asOf=analysis.asOf.isoformat(), status=status, items=items,
-            source="TEMPLATE" if rule else "AI_WORDED", groundingPassed=rule is None,
+            source="TEMPLATE" if rule else "AI_WORDED", sourceLabel=TEMPLATE_LABEL if rule else None,
+            groundingPassed=rule is None,
             failedRule=rule, failureReason=FAILURE_REASONS.get(rule),
             providerCalled=provider_called, provider=self._provider.name if provider_called else None,
             stockNotice=STOCK_NOTICE,

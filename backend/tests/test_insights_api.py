@@ -366,7 +366,8 @@ def test_grounding_failures_through_http_fall_back_to_template(client, scenario,
     result = client.post('/api/v1/guidance', json={}).json()
     assert (result['source'], result['groundingPassed'], result['failedRule']) == ('TEMPLATE', False, rule)
     assert result['items'][0]['suggestedQty'] == '28'
-    assert 'plan for 28 units' in result['items'][0]['message']
+    assert 'Consider having 28 on hand for your next 7 selling days' in result['items'][0]['message']
+    assert result['sourceLabel'] == 'Standard advice'  # M3 9.7 template label.
     assert len(provider.calls) == 1
 
 
@@ -379,7 +380,7 @@ def test_timeout_through_http(client, monkeypatch):
     finally:
         provider.release.set()
     assert (result['source'], result['groundingPassed'], result['failedRule']) == ('TEMPLATE', False, 'PROVIDER_TIMEOUT')
-    assert result['items'][0]['message'].startswith('Bread: plan for 28 units')
+    assert result['items'][0]['message'].startswith('Bread: you sold about 4.0 per logged day')
 
 
 def test_insufficient_history_makes_no_provider_call_through_http(client):

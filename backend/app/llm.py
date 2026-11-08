@@ -23,6 +23,7 @@ class ItemEvidence:
     trend: str
     changePercent: str | None
     windowLoggedDays: int
+    averageOneDecimal: str | None = None  # M3 9.6: the average as the owner sees it.
 
 
 @dataclass(frozen=True)
@@ -115,8 +116,86 @@ class MockLLMService:
         return json.dumps({"items": entries})
 
 
+DEFAULT_GUIDANCE_MODEL = "claude-haiku-5-5"
+PROVIDER_TIMEOUT_SECONDS = 15.0
+
+# M3 9.6 rule 1: the model returns write_guidance output that matches this schema exactly.
+WRITE_GUIDANCE_TOOL = {
+    "name": "write_guidance",
+    "description": "Return one plain-English planning message for every item in the evidence, exactly once each.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["items"],
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["itemName", "suggestedQty", "message"],
+                    "properties": {
+                        "itemName": {"type": "string"},
+                        "suggestedQty": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+class ProviderRefused(Exception):
+    """The provider declined (stop_reason "refusal"); the engine falls back to Standard advice."""
+
+
+class ClaudeLLMService:
+    """LLMService realization for Anthropic Claude (M3 5.2, 9.3), used when AI_PROVIDER=claude.
+
+    One attempt, never retried (M3 SD-03): the SDK client has max_retries=0 and a 15-second
+    timeout, and GuidanceEngine adds its own 15-second deadline. The tool is strict and the
+    prompt asks for it, with tool_choice "auto" (current models reject forced tool choice).
+    Anything other than a complete write_guidance call raises, which the engine turns into
+    template ("Standard advice") wording; the reply is still grounding-checked if it parses.
+    Only item names and calculated numbers are sent (NFR-713); never prices, dates or rows.
+    """
+    name = "claude"
+
+    def __init__(self, api_key: str, model_name: str = DEFAULT_GUIDANCE_MODEL, client=None):
+        if client is None:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=PROVIDER_TIMEOUT_SECONDS)
+        self.client = client
+        self.model_name = model_name
+
+    def generate(self, request: WordingRequest) -> str:
+        response = self.client.messages.create(
+            model=self.model_name,
+            max_tokens=2048,
+            system=request.instructions + "\nCall write_guidance once with every item.",
+            messages=[{"role": "user", "content": request.prompt()}],
+            tools=[WRITE_GUIDANCE_TOOL],
+            tool_choice={"type": "auto"},
+            output_config={"effort": "low"},  # Short rewording of fixed figures.
+        )
+        if response.stop_reason == "refusal":
+            raise ProviderRefused
+        if response.stop_reason == "max_tokens":
+            raise RuntimeError("guidance output truncated")
+        for block in response.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == "write_guidance":
+                payload = block.input if isinstance(block.input, dict) else json.loads(block.input)
+                return json.dumps(payload)
+        raise RuntimeError("no write_guidance call")
+
+
 def get_wording_provider() -> WordingProvider:
     """FastAPI dependency; tests replace it through app.dependency_overrides."""
-    if os.getenv("AI_PROVIDER") == "mock":
+    provider = os.getenv("AI_PROVIDER", "").strip().lower()
+    if provider == "mock":
         return MockLLMService()
+    if provider == "claude" and os.getenv("AI_API_KEY"):
+        return ClaudeLLMService(os.environ["AI_API_KEY"], os.getenv("AI_GUIDANCE_MODEL") or DEFAULT_GUIDANCE_MODEL)
     return UnavailableWordingProvider()
