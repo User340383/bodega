@@ -1,20 +1,9 @@
 import { useState } from 'react'
+import { FIELDS as fields, LABELS as labels, MAX_ITEM_CHARS, MAX_ROWS, STATUS_LABELS, fieldError, validLineId } from './draftRules'
 
-const fields = ['itemName', 'quantity', 'unitPrice']
-const labels = { itemName: 'Item', quantity: 'Quantity', unitPrice: 'Unit price' }
-const numeric = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
-
-function fieldError(row, field) {
-  const value = row[field].trim()
-  if (!value) return `${labels[field]} is required.`
-  if (field === 'itemName') return ''
-  if (!numeric.test(value)) return 'Enter a finite number.'
-  // Check sign and zero without rounding or underflow through JavaScript Number.
-  const mantissa = value.split(/[eE]/)[0]
-  const nonzero = /[1-9]/.test(mantissa)
-  if ((mantissa.startsWith('-') && nonzero) || (field === 'quantity' && !nonzero)) return field === 'quantity' ? 'Quantity must be greater than zero.' : 'Price cannot be negative.'
-  return ''
-}
+// Every open state accepts the same confirm (M3 Diagram 4). For AI_UNAVAILABLE and REJECTED the
+// table starts empty and the owner types the rows (M3 4.3 /review).
+const EDITABLE = ['NEEDS_VERIFICATION', 'AI_UNAVAILABLE', 'REJECTED']
 
 function reviewRows(draft) {
   return (draft.lines || []).map((line, index) => ({
@@ -28,12 +17,12 @@ export default function DraftReview({ draft, request, onConfirmed }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
-  const [status, setStatus] = useState(draft.status)
-  const editable = ['NEEDS_VERIFICATION', 'AI_UNAVAILABLE'].includes(status)
+  const status = draft.status
+  const editable = EDITABLE.includes(status)
   const extractedRows = rows.filter(row => row.extracted)
-  const missingLink = extractedRows.some(row => typeof row.lineId !== 'string' || !row.lineId.trim()) ||
-    new Set(extractedRows.map(row => row.lineId)).size !== extractedRows.length
-  const invalid = missingLink || rows.length === 0 || rows.length > 100 || rows.some(row => fields.some(field =>
+  const missingLink = extractedRows.some(row => !validLineId(row.lineId)) ||
+    new Set(extractedRows.map(row => String(row.lineId))).size !== extractedRows.length
+  const invalid = missingLink || rows.length === 0 || rows.length > MAX_ROWS || rows.some(row => fields.some(field =>
     fieldError(row, field) || (row.extracted && row.bands?.[field] !== 'HIGH' && !row.verifiedFields.includes(field)),
   ))
 
@@ -54,35 +43,27 @@ export default function DraftReview({ draft, request, onConfirmed }) {
         body: JSON.stringify({ submissionId: draft.submissionId, lines: rows.map(row => ({
           draftLineId: row.extracted ? row.lineId : null, source: row.extracted ? 'AI_EXTRACTED' : 'MANUAL',
           itemName: row.itemName.trim(),
-          quantity: row.quantity, unitPrice: row.unitPrice, verifiedFields: row.verifiedFields,
+          quantity: row.quantity.trim(), unitPrice: row.unitPrice.trim(), verifiedFields: row.verifiedFields,
         })) }),
       })
       setResult(response)
-      onConfirmed()
+      onConfirmed?.(response)
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
 
   return <section aria-labelledby="draft-heading">
     <h2 id="draft-heading">Review draft</h2>
-    <p>Sales date: {draft.saleDate} | {status}</p>
-    <p>Check every row before confirming. Highlighted fields need verification or correction.</p>
-    {status === 'REJECTED' && <button disabled={busy} onClick={async () => {
-      setBusy(true)
-      setError('')
-      try {
-        const updated = await request(`/api/v1/submissions/${draft.submissionId}/manual-review`, { method: 'POST' })
-        setStatus(updated.status)
-        setRows([])
-      } catch (err) { setError(err.message) }
-      finally { setBusy(false) }
-    }}>Review manually</button>}
-    {!editable && <p role="status">This submission is not awaiting confirmation.</p>}
+    <p>Sales date: {draft.saleDate} · {STATUS_LABELS[status] || status}</p>
+    {editable && <p>Check every row before confirming. Highlighted fields need a tick or a correction.</p>}
+    {!editable && <p role="status">{status === 'CONFIRMED'
+      ? 'These sales are already saved. You can see them in History.'
+      : 'This sales log is still being read. Refresh in a moment.'}</p>}
     {missingLink && <p role="alert">This draft could not be loaded completely. Reopen it before confirming.</p>}
     <form onSubmit={confirm}>
       <fieldset disabled={busy || !!result || !editable}>
         <div className="table-scroll"><table>
-          <thead><tr>{fields.map(field => <th key={field}>{labels[field]}</th>)}<th>Actions</th></tr></thead>
+          <thead><tr>{fields.map(field => <th key={field} scope="col">{labels[field]}</th>)}<th scope="col">Actions</th></tr></thead>
           <tbody>{rows.map((row, index) => <tr key={row.key}>
             {fields.map(field => {
               const uncertain = row.extracted && row.bands?.[field] !== 'HIGH'
@@ -94,6 +75,7 @@ export default function DraftReview({ draft, request, onConfirmed }) {
                   <input required
                     aria-invalid={!!validation} aria-describedby={validation ? errorId : undefined}
                     inputMode={field === 'itemName' ? 'text' : 'decimal'} value={row[field]}
+                    maxLength={field === 'itemName' ? MAX_ITEM_CHARS + 20 : undefined}
                     onChange={event => change(row.key, field, event.target.value)} />
                 </label>
                 {validation && <p id={errorId} className="field-error">{validation}</p>}
@@ -108,11 +90,11 @@ export default function DraftReview({ draft, request, onConfirmed }) {
             <td><button type="button" onClick={() => setRows(rows.filter(current => current.key !== row.key))}>Remove row {index + 1}</button></td>
           </tr>)}</tbody>
         </table></div>
-        <button type="button" disabled={rows.length >= 100} onClick={() => setRows([...rows, {
+        <button type="button" disabled={rows.length >= MAX_ROWS} onClick={() => setRows([...rows, {
           key: crypto.randomUUID(), extracted: false, itemName: '', quantity: '', unitPrice: '', verifiedFields: [],
         }])}>Add row</button>
-        <p>Use a nonblank item, a finite positive quantity and a finite nonnegative unit price.</p>
-        {invalid && <p role="status">Complete all fields and verify highlighted values. Between 1 and 100 valid rows are required.</p>}
+        <p className="hint">Each row needs an item (up to 100 characters), a quantity above 0 and a price of 0 or more, with at most 2 decimal places.</p>
+        {editable && invalid && <p role="status">Complete all fields and tick highlighted values. Between 1 and 100 valid rows are required.</p>}
         <button type="submit" disabled={invalid}>{busy ? 'Saving...' : 'Confirm sales'}</button>
       </fieldset>
     </form>

@@ -17,7 +17,8 @@ function fakeBackend(overrides = {}) {
     if (init.headers.Authorization !== `Bearer ${CODE}`) return json(401, { detail: 'Unauthorized' })
     const path = url.split('?')[0]
     if (overrides[path]) return overrides[path](url, init)
-    if (path === '/api/v1/sales') return json(200, { records: [], limit: 100, offset: 0 })
+    if (path === '/api/v1/sales') return json(200, { start: '2026-04-03', end: '2026-04-30', records: [] })
+    if (path === '/api/v1/submissions') return json(200, [])
     if (path === '/api/v1/analysis') return json(200, { status: 'INSUFFICIENT_HISTORY', loggedDays: 0, requiredDays: 7, estimates: [] })
     return json(404, { detail: 'Not found' })
   })
@@ -107,9 +108,33 @@ describe('application shell', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(`/review/${DRAFT_ID}`)
     expect(await screen.findByRole('heading', { name: 'Review draft' })).toBeInTheDocument()
     expect(screen.getByText('Bread 3 1.50')).toBeInTheDocument()
-    // Now remembered for this tab.
-    await user.click(screen.getByRole('link', { name: 'Pending drafts' }))
+  })
+
+  it('lists pending drafts from the API and discards one (FR-216)', async () => {
+    sessionStorage.setItem('bodega.accessCode', CODE)
+    const user = userEvent.setup()
+    let drafts = [{ submissionId: DRAFT_ID, status: 'REJECTED', inputType: 'IMAGE', saleDate: '2026-04-29',
+      createdAt: '2026-04-29T10:00:00Z', lineCount: 0 }]
+    const fetchImpl = fakeBackend({
+      '/api/v1/submissions': () => json(200, drafts),
+      [`/api/v1/submissions/${DRAFT_ID}`]: (url, init) => {
+        expect(init.method).toBe('DELETE')
+        drafts = []
+        return Promise.resolve(new Response(null, { status: 204 }))
+      },
+    })
+    renderApp('/drafts', fetchImpl)
+    expect(await screen.findByText(/2026-04-29 · Photo · Could not read/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute('href', `/review/${DRAFT_ID}`)
+    await user.click(screen.getByRole('button', { name: 'Discard draft from 2026-04-29' }))
+    expect(await screen.findByText('Discarded the draft from 2026-04-29.')).toBeInTheDocument()
+    expect(await screen.findByText(/No pending drafts/)).toBeInTheDocument()
+  })
+
+  it('offers photo, text and manual capture tabs (M3 4.3)', () => {
+    sessionStorage.setItem('bodega.accessCode', CODE)
+    renderApp('/capture', fakeBackend())
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['Photo', 'Text', 'Enter manually'])
   })
 
   it('shows a not-found page for unknown paths', () => {

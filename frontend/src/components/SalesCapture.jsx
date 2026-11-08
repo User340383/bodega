@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   FALLBACK_TEXT, INPUT_NOTICE, LOADING_TEXT, MAX_TEXT_CHARS, REQUEST_TIMEOUT_MS, fileProblem, localToday, textProblem,
 } from './captureRules'
+import ManualEntry from './ManualEntry'
 import './SalesCapture.css'
 
-// José: capture screen (M3 4.3 /capture). Photo or typed text -> POST /api/v1/extract -> draft for review.
-export default function SalesCapture({ request, onDraft, today = localToday }) {
+// José: capture screen (M3 4.3 /capture). Three tabs: Photo and Text go to POST /api/v1/extract and a
+// draft for review; Enter manually saves rows directly with POST /api/v1/manual-entries (FR-104).
+export default function SalesCapture({ request, onDraft, onManualSaved, today = localToday }) {
   const [mode, setMode] = useState('photo')
   const [saleDate, setSaleDate] = useState(() => today())
   const [file, setFile] = useState(null)
@@ -21,7 +23,7 @@ export default function SalesCapture({ request, onDraft, today = localToday }) {
 
   const maxDate = today()
   const dateProblem = !saleDate ? 'Choose the sale date.' : saleDate > maxDate ? 'Sale date cannot be in the future.' : ''
-  const inputProblem = mode === 'photo' ? fileProblem(file) : textProblem(text)
+  const inputProblem = mode === 'photo' ? fileProblem(file) : mode === 'text' ? textProblem(text) : ''
   const problem = dateProblem || inputProblem
 
   function reset() {
@@ -61,11 +63,11 @@ export default function SalesCapture({ request, onDraft, today = localToday }) {
   return <section aria-labelledby="capture-heading" className="capture">
     <h2 id="capture-heading">Capture sales</h2>
     <div role="tablist" aria-label="How to capture sales" className="capture-tabs">
-      {[['photo', 'Photo'], ['text', 'Text']].map(([value, label]) => <button key={value} type="button" role="tab"
+      {[['photo', 'Photo'], ['text', 'Text'], ['manual', 'Enter manually']].map(([value, label]) => <button key={value} type="button" role="tab"
         aria-selected={mode === value} className={mode === value ? 'active' : ''} disabled={busy}
         onClick={() => { setMode(value); setError(''); setOutcome(null) }}>{label}</button>)}
     </div>
-    <form onSubmit={submit}>
+    {mode === 'manual' ? <ManualEntry request={request} onSaved={onManualSaved} today={today} /> : <form onSubmit={submit}>
       <fieldset disabled={busy}>
         <label>Sale date <input type="date" required value={saleDate} max={maxDate}
           onChange={event => setSaleDate(event.target.value)} /></label>
@@ -85,7 +87,7 @@ export default function SalesCapture({ request, onDraft, today = localToday }) {
         <button type="submit" disabled={busy || !!problem} aria-describedby="input-notice">
           {busy ? 'Reading…' : mode === 'photo' ? 'Read photo' : 'Read text'}</button>
       </fieldset>
-    </form>
+    </form>}
     {busy && <p role="status" className="capture-loading"><span className="spinner" aria-hidden="true" />{LOADING_TEXT}</p>}
     {error && <p role="alert">{error} Nothing was saved; you can try again.</p>}
     {outcome && <div role="status" className={`capture-outcome ${outcome.status === 'NEEDS_VERIFICATION' ? 'ok' : 'fallback'}`}>

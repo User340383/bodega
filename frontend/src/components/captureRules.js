@@ -9,7 +9,7 @@ export const REQUEST_TIMEOUT_MS = 90_000
 
 export const FALLBACK_TEXT = {
   AI_UNAVAILABLE: 'We could not read this right now. You can type the sales below.',
-  REJECTED: 'We could not use this input. Retake the photo, or review it manually and type the sales.',
+  REJECTED: 'We could not read this. Retake the photo with good light, the page flat and fully in frame, or type the sales below.',
 }
 
 export function localToday(now = new Date()) {
@@ -24,9 +24,16 @@ export function fileProblem(file) {
   return ''
 }
 
+// Same rule as the server (NFR-714): no web code/tags and no control characters.
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/
+const MARKUP = /<\s*\/?\s*[A-Za-z!?][^>]*>|<\s*script|javascript\s*:/i
+
 export function textProblem(text) {
   const trimmed = text.trim()
   if (!trimmed) return 'Type or paste at least one sales line.'
   if (trimmed.length > MAX_TEXT_CHARS) return `Text can be at most ${MAX_TEXT_CHARS.toLocaleString('en-US')} characters.`
+  if (CONTROL.test(trimmed)) return 'Text contains characters that are not allowed. Type or paste plain sales lines.'
+  if (MARKUP.test(trimmed)) return 'Text cannot contain web code or tags. Type or paste plain sales lines.'
   return ''
 }

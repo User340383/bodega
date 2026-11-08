@@ -49,7 +49,11 @@ export default function ReviewPage() {
   const { draft } = state
   const fallback = FALLBACK_TEXT[draft.status]
   return <>
-    {fallback && <p className="status-note" role="status">{draft.message || fallback}</p>}
+    {fallback && <div className="status-note" role="status">
+      <p>{draft.message || fallback}</p>
+      {draft.status === 'REJECTED' && draft.inputType === 'IMAGE' &&
+        <Link className="button-link" to="/capture">Retake the photo</Link>}
+    </div>}
     <div className="review-layout">
       <SourcePanel draft={draft} />
       <DraftReview key={String(draft.submissionId)} draft={draft} request={request} onConfirmed={() => setConfirmed(true)} />

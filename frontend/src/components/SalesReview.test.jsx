@@ -68,28 +68,100 @@ describe('Draft review', () => {
     expect(await screen.findByText(/already confirmed/)).toBeInTheDocument()
   })
 
-  it('explicitly recovers a rejected submission into manual review', async () => {
-    const request = vi.fn().mockResolvedValue({ status: 'NEEDS_VERIFICATION', lines: [] })
+  it('lets the owner type and confirm a rejected submission directly (M3 Diagram 4)', async () => {
+    const request = vi.fn().mockResolvedValue({ recordIds: ['r1'], created: true })
     const { user } = review({ status: 'REJECTED', lines: [] }, request)
+    expect(screen.queryByRole('button', { name: 'Review manually' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add row' }))
+    await user.type(screen.getByRole('textbox', { name: 'Row 1 Item' }), 'Rice (lb)')
+    await user.type(screen.getByRole('textbox', { name: 'Row 1 Quantity' }), '2.25')
+    await user.type(screen.getByRole('textbox', { name: 'Row 1 Unit price' }), '0.80')
+    await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
+    expect(request).toHaveBeenCalledTimes(1)
+    const body = JSON.parse(request.mock.calls[0][1].body)
+    expect(body.lines[0]).toMatchObject({ source: 'MANUAL', draftLineId: null, quantity: '2.25', unitPrice: '0.80' })
+  })
+
+  it('accepts integer line IDs from extraction (M3 7.3) and shows plain-language states', async () => {
+    const request = vi.fn().mockResolvedValue({ recordIds: ['r1'], created: true })
+    const { user } = review({ lines: [{ ...draft.lines[0], lineId: 1 }] }, request)
+    expect(screen.getByText(/Needs checking/)).toBeInTheDocument()
+    expect(screen.queryByText(/NEEDS_VERIFICATION/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'Please verify' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
+    expect(JSON.parse(request.mock.calls[0][1].body).lines[0].draftLineId).toBe(1)
+  })
+
+  it('shows a confirmed submission as saved and read-only', () => {
+    review({ status: 'CONFIRMED', lines: [] })
+    expect(screen.getByText(/already saved/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add row' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: 'Review manually' }))
-    expect(request).toHaveBeenCalledWith(`/api/v1/submissions/${draft.submissionId}/manual-review`, { method: 'POST' })
-    expect(screen.getByRole('button', { name: 'Add row' })).toBeEnabled()
   })
 })
 
+const record = (overrides = {}) => ({
+  recordId: crypto.randomUUID(), submissionId: 'sub-1', saleDate: '2026-10-01', lineNo: 1, itemName: 'Bread',
+  quantity: '1', unitPrice: '0', lineTotal: '0', source: 'MANUAL', ...overrides,
+})
+const ledger = records => ({ start: '2026-09-04', end: '2026-10-01', records })
+
 describe('Confirmed sales ledger', () => {
+  it('filters by a date range', async () => {
+    const request = vi.fn().mockResolvedValue(ledger([]))
+    const user = userEvent.setup()
+    render(<SalesHistory request={request} revision={0} />)
+    await screen.findByText(/No confirmed sales in these dates/)
+    await user.type(screen.getByLabelText('From'), '2026-01-01')
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith('/api/v1/sales?start=2026-01-01'))
+  })
+
+  it('deletes a submission only after DELETE is typed, and reports the count (FR-304)', async () => {
+    const rows = [record({ itemName: 'Bread' }), record({ itemName: 'Milk', lineNo: 2 }), record({ submissionId: 'sub-2', itemName: 'Eggs' })]
+    const request = vi.fn(path => (path.startsWith('/api/v1/sales') ? Promise.resolve(ledger(rows)) : Promise.resolve(null)))
+    const user = userEvent.setup()
+    render(<SalesHistory request={request} revision={0} />)
+    const buttons = await screen.findAllByRole('button', { name: /Delete submission from 2026-10-01/ })
+    expect(buttons).toHaveLength(2) // One per submission, not per row.
+    await user.click(buttons[0])
+    expect(screen.getByText(/This deletes 2 records/)).toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: 'Delete' })
+    expect(confirm).toBeDisabled()
+    await user.type(screen.getByLabelText('Type DELETE'), 'delete')
+    expect(confirm).toBeDisabled()  // Exact word only.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing was deleted.')
+    expect(request.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false)
+
+    await user.click(screen.getAllByRole('button', { name: /Delete submission from 2026-10-01/ })[0])
+    await user.type(screen.getByLabelText('Type DELETE'), 'DELETE')
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(request).toHaveBeenCalledWith('/api/v1/submissions/sub-1', { method: 'DELETE' })
+    expect(await screen.findByText('Deleted 2 records from 2026-10-01.')).toBeInTheDocument()
+  })
+
+  it('keeps everything when a delete fails', async () => {
+    const request = vi.fn(path => (path.startsWith('/api/v1/sales') ? Promise.resolve(ledger([record()])) : Promise.reject(new Error('Server busy.'))))
+    const user = userEvent.setup()
+    render(<SalesHistory request={request} revision={0} />)
+    await user.click(await screen.findByRole('button', { name: /Delete submission/ }))
+    await user.type(screen.getByLabelText('Type DELETE'), 'DELETE')
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(await screen.findByText('Server busy. Nothing was deleted.')).toBeInTheDocument()
+  })
+
   it('shows loading then an empty state', async () => {
     let finish
     const request = vi.fn(() => new Promise(resolve => { finish = resolve }))
     render(<SalesHistory request={request} revision={0} />)
     expect(screen.getByRole('status')).toHaveTextContent('Loading sales')
-    finish({ records: [] })
-    expect(await screen.findByText('No confirmed sales on this page.')).toBeInTheDocument()
+    finish({ start: '2026-04-03', end: '2026-04-30', records: [] })
+    expect(await screen.findByText(/No confirmed sales in these dates/)).toBeInTheDocument()
+    expect(screen.getByText('Showing 2026-04-03 to 2026-04-30.')).toBeInTheDocument()
+    expect(request).toHaveBeenCalledWith('/api/v1/sales')
   })
 
   it('shows failures and refreshes successfully', async () => {
-    const request = vi.fn().mockRejectedValueOnce(new Error('Unauthorized')).mockResolvedValueOnce({ records: [{ id: 'one', saleDate: '2026-10-01', itemName: 'Bread', quantity: '2.5', unitPrice: '1.20', source: 'MANUAL' }] })
+    const request = vi.fn().mockRejectedValueOnce(new Error('Unauthorized')).mockResolvedValueOnce({ start: '2026-09-04', end: '2026-10-01', records: [record({ itemName: 'Bread', quantity: '2.5', unitPrice: '1.20', lineTotal: '3.000' })] })
     const user = userEvent.setup()
     render(<SalesHistory request={request} revision={0} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Unauthorized')
@@ -97,12 +169,14 @@ describe('Confirmed sales ledger', () => {
     expect(await screen.findByText('Bread')).toBeInTheDocument()
     expect(screen.getByText('2.5')).toBeInTheDocument()
     expect(screen.getByText('1.20')).toBeInTheDocument()
+    expect(screen.getByText('3.000')).toBeInTheDocument()
+    expect(screen.getByText('Typed by you')).toBeInTheDocument()
   })
 
   it('reloads records after confirmation changes the revision', async () => {
-    const request = vi.fn().mockResolvedValueOnce({ records: [] }).mockResolvedValueOnce({ records: [{ id: 'one', itemName: 'Milk', saleDate: '2026-10-01', quantity: '1', unitPrice: '0', source: 'MANUAL' }] })
+    const request = vi.fn().mockResolvedValueOnce(ledger([])).mockResolvedValueOnce(ledger([record({ itemName: 'Milk' })]))
     const { rerender } = render(<SalesHistory request={request} revision={0} />)
-    await screen.findByText('No confirmed sales on this page.')
+    await screen.findByText(/No confirmed sales in these dates/)
     rerender(<SalesHistory request={request} revision={1} />)
     expect(await screen.findByText('Milk')).toBeInTheDocument()
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2))
@@ -149,17 +223,23 @@ describe('Review contract regressions', () => {
     expect(body.lines[1]).toMatchObject({ source: 'MANUAL', draftLineId: null, itemName: 'Milk' })
   })
 
-  it.each(['0.0000001', '123456789012345678901.1234567', '1e-400'])('sends finite quantity %s and long labels without rounding', async (quantity) => {
-    const request = vi.fn().mockResolvedValue({ recordIds: ['a'], created: true })
-    const label = 'Item ' + 'x'.repeat(210)
-    const { user } = review({ lines: [{
-      ...draft.lines[0], itemName: label, quantity, unitPrice: '0.123456789',
-      bands: { itemName: 'HIGH', quantity: 'HIGH', unitPrice: 'HIGH' },
-    }] }, request)
-    expect(screen.getByRole('textbox', { name: 'Row 1 Item' })).not.toHaveAttribute('maxlength')
-    await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
-    const line = JSON.parse(request.mock.calls[0][1].body).lines[0]
-    expect(line).toMatchObject({ itemName: label, quantity, unitPrice: '0.123456789' })
+  it.each([['0.01', '0', 'x'], ['99999.99', '9999999.99', 'x'.repeat(100)], ['1E+2', '1.5', 'Eggs'], ['2.50', '1.20', 'Rice (lb)']])(
+    'sends boundary quantity %s exactly, without rounding', async (quantity, unitPrice, itemName) => {
+      const request = vi.fn().mockResolvedValue({ recordIds: ['a'], created: true })
+      const { user } = review({ lines: [{ ...draft.lines[0], itemName, quantity, unitPrice,
+        bands: { itemName: 'HIGH', quantity: 'HIGH', unitPrice: 'HIGH' } }] }, request)
+      await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
+      expect(JSON.parse(request.mock.calls[0][1].body).lines[0]).toMatchObject({ itemName, quantity, unitPrice })
+    })
+
+  it.each([
+    ['quantity', '0.001', 'Use at most 2 decimal places.'], ['quantity', '100000', 'Quantity can be at most 99,999.99.'],
+    ['quantity', '1e-400', 'Use at most 2 decimal places.'], ['unitPrice', '10000000', 'Price can be at most 9,999,999.99.'],
+    ['itemName', 'x'.repeat(101), 'Use at most 100 characters.'],
+  ])('blocks %s %s outside the final M3 limits', (field, value, message) => {
+    review({ lines: [{ ...draft.lines[0], [field]: value, bands: { itemName: 'HIGH', quantity: 'HIGH', unitPrice: 'HIGH' } }] })
+    expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeDisabled()
+    expect(screen.getByText(message)).toBeInTheDocument()
   })
 
   it.each(['NaN', 'Infinity', '-0.0000001', '0e100'])('blocks invalid quantity %s', (quantity) => {
