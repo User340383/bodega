@@ -23,8 +23,30 @@ def client(monkeypatch):
     app.state.access_limiter = security.FailedAttemptLimiter()
 
 
-def test_health_needs_no_access_code(client):
+class _FakeConnection:
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def __enter__(self):
+        if self.fail:
+            import psycopg
+            raise psycopg.OperationalError("down")
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, *_):
+        return None
+
+
+def test_health_needs_no_access_code_and_checks_the_database(client, monkeypatch):
+    import app.main as main
+    monkeypatch.setattr(main, "connect", lambda: _FakeConnection())
     assert client.get("/health").json() == {"status": "ok"}
+    monkeypatch.setattr(main, "connect", lambda: _FakeConnection(fail=True))
+    response = client.get("/health")
+    assert response.status_code == 503 and response.json() == {"status": "unavailable"}
 
 
 @pytest.mark.parametrize("header", [None, "Bearer wrong", "correct-code-123", "Bearer correct-code-1234", "bearer correct-code-123"])

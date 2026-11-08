@@ -32,6 +32,23 @@ PHONE_PATTERN = re.compile(
 EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
+# NFR-714: script or markup injection and control characters are rejected server-side.
+# Sales logs never need angle-bracket tags; tab, newline and carriage return are allowed.
+_MARKUP_TAG = re.compile(r"<\s*/?\s*[A-Za-z!?][^>]*>|<\s*script|javascript\s*:", re.IGNORECASE)
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def text_problem(text: str) -> str | None:
+    """Return a plain-English reason the (already trimmed) sales text is invalid, or None."""
+    if not text or len(text) > MAX_TEXT_CHARS:
+        return "Text must contain 1-5,000 characters."
+    if _CONTROL.search(text):
+        return "Text contains characters that are not allowed. Type or paste plain sales lines."
+    if _MARKUP_TAG.search(text):
+        return "Text cannot contain web code or tags. Type or paste plain sales lines."
+    return None
+
+
 class InvalidImageError(ValueError):
     """The upload is not an acceptable JPEG/PNG image. The message is safe to show the owner."""
 

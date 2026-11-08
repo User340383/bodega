@@ -68,7 +68,7 @@ def test_all_null_lines_are_dropped_and_no_lines_is_rejected():
         "status": "REJECTED", "payload": {"version": 1, "message": "No sales lines found.", "lines": []}}
     assert apply_confidence_bands(result(), "IMAGE")["status"] == "REJECTED"
     kept = apply_confidence_bands(result(empty, line(), empty, line("Milk")), "TEXT")["payload"]["lines"]
-    assert [(entry["lineId"], entry["itemName"]) for entry in kept] == [("1", "Bread"), ("2", "Milk")]
+    assert [(entry["lineId"], entry["itemName"]) for entry in kept] == [(1, "Bread"), (2, "Milk")]
 
 
 def test_every_readable_draft_needs_verification_even_when_all_high():
@@ -106,7 +106,7 @@ def statuses(monkeypatch):
     """Record status writes instead of touching the database."""
     recorded = []
     monkeypatch.setattr(ingestion.repository, "update_status",
-                        lambda sid, status, draft_payload=None: recorded.append((status, draft_payload)))
+                        lambda sid, status, draft_payload=None, **_: recorded.append((status, draft_payload)))
     return recorded
 
 

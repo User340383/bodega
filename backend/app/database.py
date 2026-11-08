@@ -21,6 +21,11 @@ def migrate():
             if not conn.execute("SELECT 1 FROM schema_migrations WHERE version=%s", (path.name,)).fetchone():
                 conn.execute(path.read_text(encoding="utf-8"))
                 conn.execute("INSERT INTO schema_migrations(version) VALUES (%s)", (path.name,))
+        # M3 7.1: OWNERS holds the single owner, seeded from OWNER_ID and OWNER_DISPLAY_NAME.
+        if os.getenv("OWNER_ID"):
+            conn.execute("""INSERT INTO owners(id, display_name) VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name""",
+                         (os.environ["OWNER_ID"], (os.getenv("OWNER_DISPLAY_NAME") or "Owner")[:100]))
 
 
 if __name__ == "__main__":

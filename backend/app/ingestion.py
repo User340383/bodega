@@ -96,7 +96,7 @@ def apply_confidence_bands(result: ExtractionResult, input_type: str) -> dict:
         confidences = {"itemName": extracted.itemNameConfidence, "quantity": extracted.quantityConfidence,
                        "unitPrice": extracted.unitPriceConfidence}
         adjusted = {"itemName": name_adjusted, "quantity": quantity_adjusted, "unitPrice": price_adjusted}
-        line = {"lineId": str(len(lines) + 1), "bands": {}}
+        line = {"lineId": len(lines) + 1, "bands": {}}  # M3 7.3: positive integer line IDs.
         for field, value in values.items():
             band = band_for(value, confidences[field])
             if band == "HIGH" and adjusted[field]:
@@ -182,5 +182,11 @@ class InferenceService:
             if (draft["status"] == "NEEDS_VERIFICATION" and input_type == "IMAGE"
                     and getattr(self.model, "name", "") == "mock"):
                 draft["payload"]["message"] = MESSAGES["MOCK_IMAGE"]
-        repository.update_status(submission_id, draft["status"], draft_payload=draft["payload"])
+        try:
+            # Only from CLASSIFYING: if the stale sweep (120 s) already recorded AI_UNAVAILABLE,
+            # that outcome stands and this late result is discarded.
+            repository.update_status(submission_id, draft["status"], draft_payload=draft["payload"],
+                                     expected_status="CLASSIFYING")
+        except repository.StaleTransition:
+            logger.warning("late extraction result discarded", extra={"submissionId": str(submission_id)})
         return draft

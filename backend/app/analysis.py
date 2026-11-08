@@ -69,6 +69,8 @@ class ItemEstimate(BaseModel):
     windowLoggedDays: int
     currentAverage: str | None
     currentAverageRounded: bool
+    # M3 4.3/9.6: the average shown to the owner, rounded half-up to 1 decimal.
+    currentAverageDisplay: str | None
     currentTotal: str | None
     currentDaysWithSales: int | None
     previousAverage: str | None
@@ -139,6 +141,12 @@ def decimal_text(value: Fraction, places: int = 6) -> tuple[str, bool]:
     magnitude = Decimal(value.denominator).adjusted() - Decimal(abs(value.numerator) or 1).adjusted()
     scale = max(places, magnitude + places)
     return _scaled_text(round(value * 10**scale), scale), True
+
+
+def one_decimal(value: Fraction) -> str:
+    """Round half-up to one decimal place, exactly (M3 9.6 "average rounded to 1 decimal")."""
+    tenths = math.floor(value * 10 + Fraction(1, 2))
+    return f"{_integer_text(tenths // 10)}.{tenths % 10}"
 
 
 def _empty_response(as_of: date, start: date) -> AnalysisResponse:
@@ -228,6 +236,7 @@ def build_analysis(records: Iterable[dict], as_of: date, start: date) -> Analysi
         estimates.append(ItemEstimate(
             itemKey=item_key, itemName=labels[item_key], windowLoggedDays=WINDOW_DAYS,
             currentAverage=current_text, currentAverageRounded=current_rounded,
+            currentAverageDisplay=one_decimal(current) if current is not None else None,
             currentTotal=decimal_text(current_total)[0] if has_estimate else None,
             currentDaysWithSales=sum((day, item_key) in observed for day in current_dates) if has_estimate else None,
             previousAverage=previous_text, previousAverageRounded=previous_rounded,
@@ -250,15 +259,40 @@ def build_analysis(records: Iterable[dict], as_of: date, start: date) -> Analysi
     )
 
 
+def snapshots(result: AnalysisResponse) -> list[dict]:
+    """BaselineEstimate rows for SD-03 saveBaselines: one per item that has an estimate."""
+    rows = []
+    for estimate in result.estimates:
+        if estimate.suggestedQty is None:
+            continue
+        rows.append({
+            "itemName": estimate.itemName, "itemKey": estimate.itemKey, "windowDays": WINDOW_DAYS,
+            "loggedDays": result.loggedDays, "averageDailyQuantity": Decimal(estimate.currentAverage),
+            "priorAverageDailyQuantity": Decimal(estimate.previousAverage) if estimate.previousAverage else None,
+            "trend": estimate.trend, "suggestedRestockQty": int(estimate.suggestedQty),
+        })
+    return rows
+
+
 class BaselineAnalyzer:
-    """Computes fresh results from confirmed records; never reads or writes snapshots."""
+    """Computes results fresh from confirmed records every time (FR-404).
 
-    def __init__(self, fetch_records: Callable[[date, date], list[dict]] | None = None):
+    With save_snapshots, the results are also stored as BASELINE_ESTIMATES snapshots for that
+    asOf date, replacing earlier ones (SD-03 saveBaselines, M3 7.1). Snapshots are an audit
+    record only: they are never read back to produce a response, so they cannot go stale.
+    """
+
+    def __init__(self, fetch_records: Callable[[date, date], list[dict]] | None = None,
+                 save_snapshots: Callable[[date, list[dict]], None] | None = None):
         self._fetch_records = fetch_records or repository.get_confirmed_sales_between
+        self._save_snapshots = save_snapshots or repository.replace_baselines
 
-    def analyze(self, as_of: date) -> AnalysisResponse:
+    def analyze(self, as_of: date, *, save_snapshots: bool = False) -> AnalysisResponse:
         start = as_of - timedelta(days=HISTORY_CALENDAR_DAYS - 1)
-        return build_analysis(self._fetch_records(start, as_of), as_of, start)
+        result = build_analysis(self._fetch_records(start, as_of), as_of, start)
+        if save_snapshots:
+            self._save_snapshots(as_of, snapshots(result))
+        return result
 
 
 def resolve_as_of(requested: date | None, clock: Clock, location: list[str]) -> date:
