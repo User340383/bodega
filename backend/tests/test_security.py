@@ -41,6 +41,52 @@ def test_eleventh_attempt_after_ten_failures_is_429_even_with_the_right_code(cli
     assert "15 minutes" in response.json()["detail"]
 
 
+def test_spoofed_forwarded_for_cannot_bypass_the_limit(client, monkeypatch):
+    """Regression: a new left-most X-Forwarded-For value on every attempt used to reset the count."""
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    for attempt in range(10):
+        spoofed = {"Authorization": "Bearer wrong", "X-Forwarded-For": f"10.9.{attempt}.1, 203.0.113.7"}
+        assert client.get("/api/v1/sales", headers=spoofed).status_code == 401
+    rotated = {"Authorization": "Bearer correct-code-123", "X-Forwarded-For": "198.51.100.99, 203.0.113.7"}
+    assert client.get("/api/v1/sales", headers=rotated).status_code == 429
+
+
+def test_without_trusted_proxies_forwarded_for_is_ignored(client, monkeypatch):
+    monkeypatch.delenv("TRUSTED_PROXY_HOPS", raising=False)
+    for attempt in range(10):
+        headers = {"Authorization": "Bearer wrong", "X-Forwarded-For": f"192.0.2.{attempt}"}
+        assert client.get("/api/v1/sales", headers=headers).status_code == 401
+    assert client.get("/api/v1/sales", headers={"Authorization": "Bearer correct-code-123",
+                                                "X-Forwarded-For": "192.0.2.200"}).status_code == 429
+
+
+def test_distinct_clients_behind_the_proxy_are_counted_separately(client, monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    for _ in range(10):
+        assert client.get("/api/v1/sales", headers={"Authorization": "Bearer wrong",
+                                                    "X-Forwarded-For": "203.0.113.7"}).status_code == 401
+    other = {"Authorization": "Bearer correct-code-123", "X-Forwarded-For": "203.0.113.8"}
+    assert client.get("/api/v1/sales", headers=other).status_code != 429
+
+
+def test_container_does_not_trust_every_forwarded_header():
+    """uvicorn with --forwarded-allow-ips='*' takes the left-most (spoofable) X-Forwarded-For entry."""
+    from pathlib import Path
+    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+    command = next(line for line in dockerfile.splitlines() if line.startswith("CMD"))
+    assert "forwarded-allow-ips" not in command and "--proxy-headers" not in command
+    assert "--no-proxy-headers" in command
+
+
+@pytest.mark.parametrize("value", ["-1", "abc", "6", "1.5"])
+def test_invalid_proxy_hop_setting_refuses_startup(monkeypatch, value):
+    for name in security.REQUIRED_SETTINGS:
+        monkeypatch.setenv(name, "set")
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", value)
+    with pytest.raises(RuntimeError, match="TRUSTED_PROXY_HOPS"):
+        security.check_required_settings()
+
+
 def test_limiter_forgets_failures_after_the_window():
     clock = FakeTime()
     limiter = security.FailedAttemptLimiter(max_failures=10, window_seconds=900, now=clock)

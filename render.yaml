@@ -53,6 +53,10 @@ services:
         value: Bodega Owner
       - key: APP_TIMEZONE
         value: America/Santo_Domingo
+      # Render's edge proxy appends the connecting client address to X-Forwarded-For; the
+      # access-code rate limit counts that right-most entry (see app/security.py).
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
       # The only CORS origin: the frontend's public URL, e.g. https://bodega-frontend.onrender.com
       # (fromService would give the private-network host name, which browsers cannot use).
       - key: FRONTEND_URL
