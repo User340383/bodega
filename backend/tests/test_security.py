@@ -43,7 +43,12 @@ class _FakeConnection:
 def test_health_needs_no_access_code_and_checks_the_database(client, monkeypatch):
     import app.main as main
     monkeypatch.setattr(main, "connect", lambda: _FakeConnection())
-    assert client.get("/health").json() == {"status": "ok"}
+    healthy = client.get("/health")
+    assert healthy.json() == {"status": "ok"}
+    assert healthy.headers["strict-transport-security"] == "max-age=31536000"  # NFR-711
+    assert healthy.headers["x-request-id"]  # NFR-723
+    unauthorized = client.get("/api/v1/sales")
+    assert unauthorized.headers["cache-control"] == "no-store"
     monkeypatch.setattr(main, "connect", lambda: _FakeConnection(fail=True))
     response = client.get("/health")
     assert response.status_code == 503 and response.json() == {"status": "unavailable"}

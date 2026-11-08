@@ -10,6 +10,7 @@ Numbers leave this module only as strings. See docs/DIUSHEN_IMPLEMENTATION.md.
 import math
 import re
 from collections.abc import Callable, Iterable
+from itertools import pairwise
 from datetime import date, timedelta
 from decimal import Decimal
 from fractions import Fraction
@@ -204,7 +205,7 @@ def build_analysis(records: Iterable[dict], as_of: date, start: date) -> Analysi
     has_trend = logged_days >= TREND_REQUIRED_DAYS
     current_dates = logged_dates[-WINDOW_DAYS:] if has_estimate else []
     previous_dates = logged_dates[-TREND_REQUIRED_DAYS:-WINDOW_DAYS] if has_trend else []
-    skipped = [0] + [(later - earlier).days - 1 for earlier, later in zip(logged_dates, logged_dates[1:])]
+    skipped = [0] + [(later - earlier).days - 1 for earlier, later in pairwise(logged_dates)]
 
     estimates = []
     for item_key in matrix.columns:

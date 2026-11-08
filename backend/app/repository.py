@@ -321,11 +321,11 @@ def purge_expired(now=None):
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=RETENTION_DAYS)
     with connect() as conn:
-        expired = conn.execute("""SELECT id, status, image_key, owner_id FROM submissions
+        expired = conn.execute("""SELECT id, status, image_key FROM submissions
             WHERE created_at < %s AND (status <> 'CONFIRMED' OR image_key IS NOT NULL OR masked_text IS NOT NULL)
             FOR UPDATE""", (cutoff,)).fetchall()
         purged = {"openDeleted": 0, "inputsCleared": 0}
-        for submission_id, state, image_key, owner in expired:
+        for submission_id, state, image_key in expired:
             if state in PROCESSING_STATES:
                 continue  # mark_stale moves these to AI_UNAVAILABLE first; purge on the next run.
             _enqueue_image_deletion(conn, image_key)

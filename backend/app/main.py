@@ -483,4 +483,7 @@ async def no_store_api(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")  # Sales data is never cached.
+    # NFR-711: browsers must keep using HTTPS (ignored on plain-HTTP local development).
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
     return response

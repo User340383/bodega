@@ -46,6 +46,24 @@ jobs:
       - name: Run frontend checks
         run: docker compose -f compose.test.yml run --build --rm frontend-checks
 
+  static-checks:
+    name: Lint and Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository (full history for the secret scan)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # M3 8.5 "ruff check". Rules live in backend/ruff.toml.
+      - name: Ruff
+        run: pipx run ruff==0.17.4 check backend
+
+      # NFR-712: an automated secret scan of the code and its history must report 0 findings.
+      - name: Gitleaks
+        run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.21.2 git /repo --redact --no-banner
+
   production-images:
     name: Production Images
     runs-on: ubuntu-latest
@@ -71,7 +89,7 @@ jobs:
 
   deploy:
     name: Deploy to Render
-    needs: [backend-tests, frontend-checks, production-images]
+    needs: [backend-tests, frontend-checks, static-checks, production-images]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production

@@ -121,7 +121,7 @@ def test_decimal_text_keeps_significant_digits_for_tiny_repeating_values():
 def test_labels_normalize_case_and_whitespace_without_merging_synonyms():
     dates = logged_dates(7)
     records = [{'saleDate': day, 'itemName': name, 'quantity': Decimal('1')}
-               for day, name in zip(dates, ['bread', ' BREAD ', 'Bread', 'bread\t', 'BREAD', 'bread', 'Bread '])]
+               for day, name in zip(dates, ['bread', ' BREAD ', 'Bread', 'bread\t', 'BREAD', 'bread', 'Bread '], strict=True)]
     records.append({'saleDate': dates[0], 'itemName': 'Loaf', 'quantity': Decimal('1')})
     estimates = {e.itemKey: e for e in build_analysis(records, AS_OF, START).estimates}
     assert set(estimates) == {'bread', 'loaf'}

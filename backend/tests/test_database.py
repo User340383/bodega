@@ -215,7 +215,7 @@ def test_exact_decimal_history_and_immutable_records(client):
 
 
 def test_baseline_constraints_and_cascade(db):
-    sid = make_submission()
+    make_submission()  # Creates the owner the snapshot belongs to.
     values = (uuid4(), repository.owner_id(), 'Bread', 'bread', date.today(), 7, 7, '2.5', 'UP', 18)
     with connect() as conn:
         conn.execute('INSERT INTO baseline_estimates(id,owner_id,item_name,item_key,as_of_date,window_days,logged_days,average_daily_quantity,trend,suggested_restock_qty) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', values)
