@@ -340,3 +340,13 @@ The `frontend-checks` service executes `npm run lint && npm test && npm run buil
 - Existing error shapes on other endpoints are preserved. A universal error-envelope change is deferred to shared-client coordination. The Starlette TestClient deprecation warning remains. This work did not rerun npm audit or change dependencies.
 - A fresh fetch still shows main at `630c5df3303e4536e299d26ab71863a589bc2dbc`, an ancestor of feature HEAD `c61ed711efddbd3b27764d87d66116e46a10d181`. No main commits were replaced or changed, and no merge was attempted. Shared-file overlap described in section 11 still requires peer review; unmerged teammate branches were not altered.
 - **The local patch is ready for team review. PR #1 itself is unchanged and does not yet contain these fixes.** Publishing them requires the user's separate commit/push authorization; merging still requires the team's contract/integration review. No commit, push, merge, rebase, reset, force-push, or PR action was performed.
+
+## 13. Integration update (`integration/m3-completion`)
+
+The final Milestone 3 (October 23) supersedes parts of this report. Changes on the integration branch:
+
+- **Limits restored.** The final M3 defines the limits that sections 4 and 12 call "undocumented": 2 decimals, 99,999.99, 1–100 characters. Migration 003 is unchanged; migration 005 re-adds them `NOT VALID` (decision D-03).
+- **Lifecycle per Diagram 4.** REJECTED and AI_UNAVAILABLE confirm directly; `manual-review` is removed (D-04).
+- **Unmerged branch work ported.** The substance of `cb55fce` is now in `005_final_data_design.sql`, `repository.py` and `retention.py`, rebuilt on current `main` instead of merged (D-01, D-02): manual entries, pending drafts, deletion, the date-range ledger, the 30-day purge, the image outbox, and snapshots.
+- **Your work is preserved.** The original branch and stash are kept in `backup/gabriel-data-state-cb55fce` and `backup/gabriel-stash-2026-11-08`.
+- **Current status:** `docs/DATA_DICTIONARY.md` and `docs/TRACEABILITY.md`.

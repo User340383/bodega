@@ -10,3 +10,4 @@ button { cursor: pointer; background: #235c43; color: white; margin: .3rem; }
 button:disabled { opacity: .55; cursor: default; }
 input { max-width: 100%; }
 button:focus-visible, input:focus-visible { outline: 3px solid #bb6c1d; outline-offset: 2px; }
+pre, code { font-size: 1rem; } /* Monospace defaults to 13px; NFR-732 needs >= 16px body text. */

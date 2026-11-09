@@ -1,4 +1,4 @@
-﻿# Bodega
+# Bodega
 
 A web app for small shops to capture sales from a photo or text, confirm them, and get restocking estimates. Built for COMP 425, Team Bodega. Each member's report lists the details of their part:
 
@@ -7,7 +7,9 @@ A web app for small shops to capture sales from a photo or text, confirm them, a
 - [Diushen Cabrera](docs/DIUSHEN_IMPLEMENTATION.md): analysis, guidance and results dashboard
 - [Gabriel Marte](docs/GABRIEL_IMPLEMENTATION.md): data and state, draft review, sales history
 
-The app's pages are `/login`, `/capture`, `/review/:submissionId`, `/drafts`, `/history` and `/analysis`. Production runs on Render (see `render.yaml` and the deployment section of Luis's report); code reaches production only through the GitHub Actions deploy job after every check passes on `main`.
+The app's pages are `/login`, `/capture` (Photo, Text, Enter manually), `/review/:submissionId`, `/drafts`, `/history` and `/analysis`.
+
+**Integration status:** the branch `integration/m3-completion` brings all four members' work in line with the final Milestone 3. See [requirements traceability](docs/TRACEABILITY.md), [integration decisions](docs/INTEGRATION_DECISIONS.md), the [data dictionary](docs/DATA_DICTIONARY.md) and [privacy and retention](docs/privacy.md). Production runs on Render (see `render.yaml` and the deployment section of Luis's report); code reaches production only through the GitHub Actions deploy job after every check passes on `main`.
 
 ## Start locally
 
@@ -25,7 +27,7 @@ To capture sales, use **Capture sales** at the top of the page: choose **Text** 
 docker compose exec backend python -m app.seed
 ```
 
-Sign in, go to **Pending drafts**, and open submission `10000000-0000-4000-8000-000000000003` by ID. Verify or edit its highlighted unit price, then confirm; the sale then appears under **History**. Seeding is optional and never runs at startup.
+Sign in, go to **Pending drafts**, and open the seeded draft (submission `10000000-0000-4000-8000-000000000003`). Verify or edit its highlighted unit price, then confirm; the sale then appears under **History**. Seeding is optional and never runs at startup.
 
 ## Results dashboard
 

@@ -91,3 +91,14 @@ Business date note, observed while testing: in the evening in Santo Domingo the 
 - **Luis**: CI should run `test_privacy.py` / `test_ingestion.py` with `AI_PROVIDER` unset or `mock`; production needs `AI_PROVIDER=claude`, `AI_API_KEY`, the R2 `S3_*` variables and `S3_PUBLIC_ENDPOINT_URL` (can equal `S3_ENDPOINT_URL` for R2).
 - **Diushen**: `tests/mock_vision.py` can now be replaced by `app.vision.MockVisionModel` through `POST /api/v1/extract` if you want the end-to-end test to start at upload.
 - Before launch, record Anthropic's data-use and retention terms in `docs/privacy.md` (M3 9.8).
+
+## 8. Integration update (`integration/m3-completion`)
+
+- **Standalone manual entry (FR-104) is done:** the "Enter manually" tab and `POST /api/v1/manual-entries`. The trigger change it needed is in migration 005.
+- **Line IDs** are now integers (M3 7.3); older string IDs still match.
+- **Late results are guarded.** The final status write only applies from CLASSIFYING, so a late provider result cannot overwrite the 120-second stale sweep.
+- **Markup is rejected.** Text containing markup or control characters is a 400 (NFR-714).
+- **New test sets:** `test_masking.py` (50-case NFR-717), `test_invalid_inputs.py` (30-case NFR-714) and `test_resilience.py` (20 forced timeouts).
+- **RetentionService** is in `app/retention.py` (30-day purge, stale sweep, image outbox).
+- **`docs/privacy.md` exists.** The NFR-716 provider terms are still unrecorded and need the account owner.
+- **Benchmark harness:** `backend/benchmarks/extraction_benchmark.py` (NFR-751/752). No results yet: it needs 20 real pages and an authorized key.
