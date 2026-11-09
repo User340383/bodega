@@ -87,7 +87,7 @@ export default function SalesHistory({ request, revision = 0 }) {
     </form>}
 
     {state.loading ? <p role="status">Loading sales…</p> : state.error ? <p role="alert">{state.error}</p> :
-      !records.length ? <p>No confirmed sales in these dates. <a href="/capture">Capture sales</a> to add some.</p> :
+      !records.length ? <><p>No confirmed sales in these dates.</p><p><a className="button-link" href="/capture">Capture sales</a></p></> :
       <div className="table-scroll"><table>
         <thead><tr><th scope="col">Sales date</th><th scope="col">Item</th><th scope="col">Quantity</th>
           <th scope="col">Unit price</th><th scope="col">Line total</th><th scope="col">Source</th><th scope="col">Actions</th></tr></thead>

@@ -1,0 +1,189 @@
+NFR-761 / NFR-732 cross-engine run — scripts/browser_engines.mjs in mcr.microsoft.com/playwright:v1.49.1-noble,
+against compose.prodcheck.yml (production nginx bundle + API on separate origins). Run 2026-11-09.
+Engines are Playwright's Linux builds; the two device rows are emulations, not physical phones.
+
+{
+  "results": [
+    {
+      "browser": "Chromium (desktop)",
+      "version": "131.0.6778.33",
+      "steps": {
+        "sign in (NFR-718)": "pass",
+        "manual entry (UC3, FR-104)": "pass",
+        "text capture, verify and confirm (UC2, UC4)": "pass",
+        "history shows confirmed sales (UC5)": "pass",
+        "results dashboard (UC7, UC9)": "pass",
+        "layout at this viewport (NFR-732)": "pass",
+        "delete all data with typed DELETE (UC6, AC-21)": "pass"
+      },
+      "layout": {
+        "/capture": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/history": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/analysis": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/drafts": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        }
+      },
+      "pageErrors": []
+    },
+    {
+      "browser": "Firefox (desktop)",
+      "version": "132.0",
+      "steps": {
+        "sign in (NFR-718)": "pass",
+        "manual entry (UC3, FR-104)": "pass",
+        "text capture, verify and confirm (UC2, UC4)": "pass",
+        "history shows confirmed sales (UC5)": "pass",
+        "results dashboard (UC7, UC9)": "pass",
+        "layout at this viewport (NFR-732)": "pass",
+        "delete all data with typed DELETE (UC6, AC-21)": "pass"
+      },
+      "layout": {
+        "/capture": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/history": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/analysis": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/drafts": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        }
+      },
+      "pageErrors": []
+    },
+    {
+      "browser": "WebKit / Safari engine (desktop)",
+      "version": "18.2",
+      "steps": {
+        "sign in (NFR-718)": "pass",
+        "manual entry (UC3, FR-104)": "pass",
+        "text capture, verify and confirm (UC2, UC4)": "pass",
+        "history shows confirmed sales (UC5)": "pass",
+        "results dashboard (UC7, UC9)": "pass",
+        "layout at this viewport (NFR-732)": "pass",
+        "delete all data with typed DELETE (UC6, AC-21)": "pass"
+      },
+      "layout": {
+        "/capture": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/history": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/analysis": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/drafts": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        }
+      },
+      "pageErrors": []
+    },
+    {
+      "browser": "Android Chrome emulation (Pixel 7)",
+      "version": "131.0.6778.33",
+      "steps": {
+        "sign in (NFR-718)": "pass",
+        "manual entry (UC3, FR-104)": "pass",
+        "text capture, verify and confirm (UC2, UC4)": "pass",
+        "history shows confirmed sales (UC5)": "pass",
+        "results dashboard (UC7, UC9)": "pass",
+        "layout at this viewport (NFR-732)": "pass",
+        "delete all data with typed DELETE (UC6, AC-21)": "pass"
+      },
+      "layout": {
+        "/capture": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/history": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/analysis": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/drafts": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        }
+      },
+      "pageErrors": []
+    },
+    {
+      "browser": "iOS Safari emulation (iPhone 14)",
+      "version": "18.2",
+      "steps": {
+        "sign in (NFR-718)": "pass",
+        "manual entry (UC3, FR-104)": "pass",
+        "text capture, verify and confirm (UC2, UC4)": "pass",
+        "history shows confirmed sales (UC5)": "pass",
+        "results dashboard (UC7, UC9)": "pass",
+        "layout at this viewport (NFR-732)": "pass",
+        "delete all data with typed DELETE (UC6, AC-21)": "pass"
+      },
+      "layout": {
+        "/capture": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/history": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/analysis": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        },
+        "/drafts": {
+          "overflow": 0,
+          "smallTargets": [],
+          "smallText": 0
+        }
+      },
+      "pageErrors": []
+    }
+  ],
+  "failed": []
+}

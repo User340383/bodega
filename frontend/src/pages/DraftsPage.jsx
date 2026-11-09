@@ -64,7 +64,7 @@ export default function DraftsPage() {
                 {discarding === draft.submissionId ? 'Discarding…' : 'Discard'}</button>
             </span>
           </li>)}
-        </ul> : <p>No pending drafts. <Link to="/capture">Capture sales</Link>.</p>}
+        </ul> : <><p>No pending drafts.</p><p><Link className="button-link" to="/capture">Capture sales</Link></p></>}
     </section>
     <section aria-labelledby="open-heading">
       <h2 id="open-heading">Open a submission by ID</h2>

@@ -111,7 +111,7 @@ All timings follow the SRS 5 rule: at least 50 trials, the 95th percentile, and 
 | NFR-734 | P | AI wording over 150 words or above grade 8 is withheld (tested). **The fixed M3 template exceeds 150 words in total for 6 or more items** (team decision). |
 | NFR-751, NFR-752 | **B** | The harness is ready (`benchmarks/`). It needs an authorized key and the benchmark photos; the SRS asks for 30 photos and 20 messages, and no real sales-log photos exist in the repository or workspace. |
 | NFR-753 | P | "0 ungrounded displayed" is enforced and tested; "≥ 80% displayable" needs the real provider |
-| NFR-761 | P | See section 4: the engines run locally; real Safari/iOS/Android devices were not tested |
+| NFR-761 | P | Core workflow (sign-in, manual entry, capture → review → confirm, history, dashboard, delete-all) plus layout passes in **Chromium 131, Firefox 132, WebKit 18.2** and Android/iPhone emulation (`docs/verification/NFR-761-browser-engines.txt`). Edge (Chromium) on Windows runs the NFR-70x timings. **Branded Chrome/Safari/Firefox desktop releases and physical Android 10+/iOS 16+ devices were not tested.** |
 
 **16 V, 5 P, 5 B.**
 
@@ -137,3 +137,4 @@ See the final report in the pull request description for the full numbers. Evide
 |---|---|
 | `docs/verification/NFR-725-restart-trial.txt` | The 10 forced-restart trials |
 | `docs/verification/NFR-70x-browser-timings.txt` | 4G browser timings, 50 trials |
+| `docs/verification/NFR-761-browser-engines.txt` | Workflow in 3 engines and 2 device emulations |

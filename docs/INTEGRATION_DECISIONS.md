@@ -43,6 +43,8 @@ Nothing here has been merged to `main` or pushed. Branches kept unchanged for co
 | D-23 | **Readability is enforced in code:** every owner message ≤ 30 words and grade ≤ 8 (tested); AI guidance over 150 words or above grade 8 is withheld. | NFR-731, NFR-734, using the SRS 7.3 verification method. Template advice for 6 or more items exceeds 150 words in total, which conflicts with the fixed M3 template (see "Decisions that need the team"). | Diushen |
 | D-24 | **Mermaid sources committed:** `docs/architecture/*.mmd` (M3 Appendix A) and `docs/requirements/SRS.md` (M2 §6), with a CI render check. | M1, M2 §6 and M3 Appendix A each say the sources live in the repository; they did not. | All |
 
+| D-25 | **Known edge case: device timezone different from `APP_TIMEZONE`.** The capture and manual-entry forms default to the device's date (SRS 3.1). The server rejects dates after the business date. A device several hours ahead of the business (for example a UTC device after 20:00 in Santo Domingo) is therefore told the date is in the future, and can pick the business date instead. | M3 makes the business date authoritative; a single-business deployment shares one timezone. Found by the cross-engine run, whose container ran in UTC. | Luis, José |
+
 ## Decisions that need the team
 
 D-07, D-17 and D-18 are deviations from the wording of Milestone 3. NFR-734 (≤ 150 words in

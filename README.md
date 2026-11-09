@@ -53,3 +53,19 @@ docker compose -f compose.test.yml --profile smoke down
 ```
 
 The test database is temporary. The normal application remains running. Use `docker compose stop` to stop the application while retaining its volumes.
+
+## Production-topology checks and requirement measurements
+
+These are additional, slower checks. Each uses its own Compose project and in-memory database.
+
+```sh
+# Render images on two origins (nginx bundle + API with CORS), bound to 127.0.0.1
+docker compose -f compose.prodcheck.yml up -d --build --wait
+python scripts/prodcheck.py              # deployment checks; NFR-701/703 at 10 concurrent sessions
+node scripts/browser_nfr.mjs             # NFR-702/704/705 in Edge on the SRS 4G profile (npm i playwright@1.49.1)
+docker compose -f compose.prodcheck.yml down
+
+python scripts/nfr725_restart_trial.py   # NFR-725: 10 forced backend restarts during confirmation
+```
+
+Results and evidence: [docs/TRACEABILITY.md](docs/TRACEABILITY.md) and `docs/verification/`.
