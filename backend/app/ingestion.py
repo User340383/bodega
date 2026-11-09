@@ -36,9 +36,9 @@ CENT = Decimal("0.01")
 MESSAGES = {
     # SRS FR-210 and FR-211 fix these opening words; the second sentence is the action (NFR-731).
     "UNREADABLE_IMAGE": "Image could not be read. Retake it with good light, the page flat and the whole page in the frame.",
-    "UNREADABLE_TEXT": "We could not read sales lines in this text. You can type the sales below.",
-    "NO_LINES": "No sales lines found.",
-    "AI_UNAVAILABLE": "AI reading is temporarily unavailable. You can type the sales below.",
+    "UNREADABLE_TEXT": "We could not find sales lines in this text. You can type the sales in the form below.",
+    "NO_LINES": "No sales lines found. Retake the photo or type the sales below.",
+    "AI_UNAVAILABLE": "AI reading is temporarily unavailable. Type your sales in the form below. We kept your input.",
     "MOCK_IMAGE": "Demo mode: the mock AI cannot read photos, so these sample rows are not from your page. Edit or remove them.",
 }
 
@@ -166,7 +166,8 @@ class InferenceService:
                 logger.exception("unexpected extraction error", extra={"submissionId": str(submission_id)})
             logger.warning("extraction attempt failed: %s", error_code,
                            extra={"submissionId": str(submission_id), "attempt": attempt, "errorCode": error_code,
-                                  "latencyMs": int((time.monotonic() - started) * 1000)})
+                                  "operation": "vision.extract", "errorCategory": f"AI_{error_code}",
+                                  "durationMs": round((time.monotonic() - started) * 1000, 2)})
             if error_code in ("FATAL", "UNEXPECTED") or attempt == self.max_attempts:
                 return None
             self.sleep(self.retry_delay_seconds)

@@ -65,7 +65,7 @@ def test_overall_confidence_threshold(overall, status):
 def test_all_null_lines_are_dropped_and_no_lines_is_rejected():
     empty = ExtractedLine(itemNameConfidence=0, quantityConfidence=0, unitPriceConfidence=0)
     assert apply_confidence_bands(result(empty, empty), "TEXT") == {
-        "status": "REJECTED", "payload": {"version": 1, "message": "No sales lines found.", "lines": []}}
+        "status": "REJECTED", "payload": {"version": 1, "message": "No sales lines found. Retake the photo or type the sales below.", "lines": []}}
     assert apply_confidence_bands(result(), "IMAGE")["status"] == "REJECTED"
     kept = apply_confidence_bands(result(empty, line(), empty, line("Milk")), "TEXT")["payload"]["lines"]
     assert [(entry["lineId"], entry["itemName"]) for entry in kept] == [(1, "Bread"), (2, "Milk")]

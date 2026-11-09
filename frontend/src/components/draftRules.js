@@ -5,6 +5,8 @@ export const FIELDS = ['itemName', 'quantity', 'unitPrice']
 export const LABELS = { itemName: 'Item', quantity: 'Quantity', unitPrice: 'Unit price' }
 export const MAX_ITEM_CHARS = 100
 export const MAX_ROWS = 100
+// NFR-731: short plain sentences ("Item is required." scores above grade 8).
+const REQUIRED = { itemName: 'Type the item name in this box.', quantity: 'Type the quantity in this box.', unitPrice: 'Type the unit price in this box.' }
 // Largest values in hundredths (2 decimal places).
 const MAX_CENTS = { quantity: 9999999n, unitPrice: 999999999n }
 const NUMERIC = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/
@@ -30,7 +32,7 @@ export function parseDecimal(text) {
 
 export function fieldError(row, field) {
   const value = String(row[field] ?? '').trim()
-  if (!value) return `${LABELS[field]} is required.`
+  if (!value) return REQUIRED[field]
   if (field === 'itemName') return value.length > MAX_ITEM_CHARS ? `Use at most ${MAX_ITEM_CHARS} characters.` : ''
   const number = parseDecimal(value)
   if (!number) return 'Enter a number, such as 2 or 1.50.'

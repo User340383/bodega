@@ -329,3 +329,35 @@ def test_request_log_line_has_the_nfr_723_fields_and_no_inputs(client, caplog):
                            if not record.name.startswith('httpx'))
     for forbidden in ('809-555-1234', 'Bread 3', 'test-code', '2026-04-01'):
         assert forbidden not in everything
+
+
+def test_ai_storage_and_database_failures_log_every_nfr_723_field(client, caplog):
+    """SRS 7.3 NFR-723 method: trigger AI and storage failures; check log fields and no sensitive data."""
+    import io
+    from PIL import Image
+    from app.storage import InMemoryObjectStorage, get_object_storage
+    from app.vision import MockVisionModel, get_vision_model
+    caplog.set_level(logging.INFO)
+    secret = 'Call 809-555-1234 Bread 3'
+    model = MockVisionModel(fail_modes=['fatal'])
+    app.dependency_overrides[get_vision_model] = lambda: model
+    app.dependency_overrides[get_object_storage] = lambda: InMemoryObjectStorage(fail_puts=True)
+    assert client.post('/api/v1/extract', data={'saleDate': AS_OF.isoformat(), 'text': secret}).json()['status'] == 'AI_UNAVAILABLE'
+    out = io.BytesIO()
+    Image.new('RGB', (20, 20), 'white').save(out, format='JPEG')
+    assert client.post('/api/v1/extract', data={'saleDate': AS_OF.isoformat()},
+                       files={'file': ('log.jpg', out.getvalue(), 'image/jpeg')}).status_code == 503
+    with connect() as conn:
+        conn.execute("CREATE FUNCTION boom() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'x'; END $$")
+        conn.execute('CREATE TRIGGER boom BEFORE INSERT ON submissions FOR EACH ROW EXECUTE FUNCTION boom()')
+    assert client.post('/api/v1/extract', data={'saleDate': AS_OF.isoformat(), 'text': secret}).status_code == 500
+    lines = [json.loads(JsonFormatter().format(r)) for r in caplog.records
+             if r.levelno >= logging.WARNING and not r.name.startswith('httpx')]
+    categories = {line['errorCategory'] for line in lines}
+    assert {'AI_FATAL', 'STORAGE_UNAVAILABLE', 'RaiseException', 'HTTP_500', 'HTTP_503'} <= categories, categories
+    for line in lines:
+        assert {'timestamp', 'requestId', 'component', 'operation', 'errorCategory', 'durationMs'} <= set(line), line
+        assert line['timestamp'].endswith('+00:00') and isinstance(line['durationMs'], (int, float))
+    everything = '\n'.join(json.dumps(line) for line in lines)
+    for forbidden in ('809-555-1234', 'Bread 3', 'test-code', '[removed]'):
+        assert forbidden not in everything

@@ -8,7 +8,7 @@ export const MAX_TEXT_CHARS = 5000
 export const REQUEST_TIMEOUT_MS = 90_000
 
 export const FALLBACK_TEXT = {
-  AI_UNAVAILABLE: 'AI reading is temporarily unavailable. You can type the sales below.',
+  AI_UNAVAILABLE: 'AI reading is temporarily unavailable. Type your sales in the form below. We kept your input.',
   REJECTED: 'Image could not be read. Retake the photo with good light, the page flat and fully in frame, or type the sales below.',
 }
 
@@ -32,7 +32,7 @@ const MARKUP = /<\s*\/?\s*[A-Za-z!?][^>]*>|<\s*script|javascript\s*:/i
 export function textProblem(text) {
   const trimmed = text.trim()
   if (!trimmed) return 'Type or paste at least one sales line.'
-  if (trimmed.length > MAX_TEXT_CHARS) return `Text can be at most ${MAX_TEXT_CHARS.toLocaleString('en-US')} characters.`
+  if (trimmed.length > MAX_TEXT_CHARS) return `Text can be at most ${MAX_TEXT_CHARS.toLocaleString('en-US')} characters. Remove some lines and try again.`
   if (CONTROL.test(trimmed)) return 'Text contains characters that are not allowed. Type or paste plain sales lines.'
   if (MARKUP.test(trimmed)) return 'Text cannot contain web code or tags. Type or paste plain sales lines.'
   return ''

@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+request_started_var: contextvars.ContextVar[float | None] = contextvars.ContextVar("request_started", default=None)
 
 _base_factory = logging.getLogRecordFactory()
 
@@ -23,6 +24,8 @@ def _record_with_request_id(*args, **kwargs):
     # Stamp the ID when the record is created: a handler may format it after the request ends.
     record = _base_factory(*args, **kwargs)
     record.requestId = request_id_var.get()
+    started = request_started_var.get()
+    record.requestElapsedMs = round((time.monotonic() - started) * 1000, 2) if started is not None else None
     return record
 
 
@@ -54,6 +57,13 @@ class JsonFormatter(logging.Formatter):
                 entry[field] = value
         if record.exc_info:
             entry["errorCategory"] = entry.get("errorCategory") or record.exc_info[0].__name__
+        if record.levelno >= logging.WARNING:
+            # NFR-723: every error line carries operation, error category and a duration.
+            entry.setdefault("operation", f"{record.module}.{record.funcName}")
+            entry.setdefault("errorCategory", entry.get("errorCode") or record.levelname)
+            if "durationMs" not in entry:
+                elapsed = getattr(record, "requestElapsedMs", None)
+                entry["durationMs"] = elapsed if elapsed is not None else 0.0
         return json.dumps(entry, default=str)
 
 
@@ -84,6 +94,7 @@ class RequestLogMiddleware:
         request_id = str(uuid4())
         token = request_id_var.set(request_id)
         started = time.monotonic()
+        started_token = request_started_var.set(started)
         status_holder = {"status": 500}
 
         async def send_with_id(message):
@@ -106,3 +117,4 @@ class RequestLogMiddleware:
                 extra["errorCategory"] = f"HTTP_{status}"
             self.logger.log(level, "request completed", extra=extra)
             request_id_var.reset(token)
+            request_started_var.reset(started_token)

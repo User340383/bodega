@@ -78,7 +78,7 @@ ERROR_CODES = {400: "VALIDATION_ERROR", 401: "UNAUTHORIZED", 404: "NOT_FOUND", 4
 GENERIC_MESSAGES = {
     400: "Check the highlighted fields and try again.",
     401: "Your access code was not accepted. Please sign in again.",
-    404: "We could not find that. It may have been deleted.",
+    404: "We could not find that. It may have been deleted. Go back and try again.",
     409: "This cannot be changed right now. Refresh and try again.",
     500: "Your sales could not be saved or loaded. Your draft is unchanged; please try again.",
 }
@@ -358,6 +358,7 @@ def extract(
         try:
             image_key = storage.put_object(sanitized, "image/jpeg")
         except StorageError:
+            logger.error("photo storage failed", extra={"operation": "storage.put", "errorCategory": "STORAGE_UNAVAILABLE"})
             raise ApiError(503, "STORAGE_UNAVAILABLE", "We could not save your photo. Please try again.") from None
         try:
             submission_id = repository.create_submission(saleDate, image_key=image_key, input_type="IMAGE")

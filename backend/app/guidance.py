@@ -7,37 +7,41 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .analysis import AnalysisResponse, ItemEstimate, Trend, normalize_item
+from . import readability
 from .grounding import ALLOWED_WORDS, MAX_MESSAGE_CHARS, MAX_MESSAGE_WORDS, check_grounding
 from .llm import ItemEvidence, ProviderNotConfigured, WordingProvider, WordingRequest
 
 logger = logging.getLogger(__name__)
 
 PROVIDER_TIMEOUT_SECONDS = 15.0
+MAX_GUIDANCE_WORDS = 150  # NFR-734
+MAX_GUIDANCE_GRADE = 8.0  # NFR-734 (Flesch-Kincaid)
 
 # M3 9.7 fixed notices (exact text).
 STOCK_NOTICE = ("These numbers come only from the sales you logged. "
                 "Check what you already have in stock before you buy.")
 TEMPLATE_LABEL = "Standard advice"
 
-# Fixed text only: provider output and exception details never reach a response or a log.
+# Fixed text only (NFR-731: cause + one action, <= 30 words, grade <= 8, no codes or provider names).
 FAILURE_REASONS = {
-    "INSUFFICIENT_HISTORY": "At least 7 logged sales dates are needed. No wording provider was called.",
-    "PROVIDER_NOT_CONFIGURED": "No wording provider is configured, so template wording was used.",
-    "PROVIDER_TIMEOUT": "The wording provider did not respond in time, so template wording was used.",
-    "PROVIDER_FAILURE": "The wording provider failed, so template wording was used.",
-    "EMPTY_RESPONSE": "The wording provider returned nothing, so template wording was used.",
-    "MALFORMED_JSON": "The wording provider returned malformed data, so template wording was used.",
-    "INVALID_SCHEMA": "The wording provider returned an invalid structure, so template wording was used.",
-    "UNKNOWN_ITEM": "The provider named a product not in your sales analysis, so its wording was rejected.",
-    "DUPLICATE_ITEM": "The provider repeated a product, so its wording was rejected.",
-    "MISSING_ITEM": "The provider omitted a product, so its wording was rejected.",
-    "ITEM_NOT_NAMED": "The provider's message did not name its product, so its wording was rejected.",
-    "QUANTITY_MISMATCH": "The provider changed or omitted a planning quantity, so its wording was rejected.",
-    "UNSUPPORTED_NUMBER": "The provider used a number the analysis does not support, so its wording was rejected.",
-    "TREND_MISMATCH": "The provider's wording contradicted the calculated trend, so its wording was rejected.",
-    "MESSAGE_TOO_LONG": "The provider's message was too long, so its wording was rejected.",
-    "UNSAFE_MARKUP": "The provider's message was not plain text, so its wording was rejected.",
-    "UNSUPPORTED_CLAIM": "The provider made a claim outside the sales evidence, so its wording was rejected.",
+    "INSUFFICIENT_HISTORY": "Log at least 7 days of sales to get advice.",
+    "PROVIDER_NOT_CONFIGURED": "AI advice is turned off, so this is standard advice. You can still use it.",
+    "PROVIDER_TIMEOUT": "The AI took too long, so this is standard advice. You can ask again.",
+    "PROVIDER_FAILURE": "The AI did not answer, so this is standard advice. You can ask again.",
+    "EMPTY_RESPONSE": "The AI sent back nothing, so this is standard advice. You can ask again.",
+    "MALFORMED_JSON": "The AI sent back text we could not use, so this is standard advice. You can ask again.",
+    "INVALID_SCHEMA": "The AI sent back text we could not use, so this is standard advice. You can ask again.",
+    "UNKNOWN_ITEM": "The AI named an item you did not sell, so this is standard advice. You can ask again.",
+    "DUPLICATE_ITEM": "The AI named an item twice, so this is standard advice. You can ask again.",
+    "MISSING_ITEM": "The AI left out an item, so this is standard advice. You can ask again.",
+    "ITEM_NOT_NAMED": "The AI did not name each item, so this is standard advice. You can ask again.",
+    "QUANTITY_MISMATCH": "The AI changed a number, so this is standard advice. You can ask again.",
+    "UNSUPPORTED_NUMBER": "The AI used a number that is not in your sales, so this is standard advice. You can ask again.",
+    "TREND_MISMATCH": "The AI got the sales trend wrong, so this is standard advice. You can ask again.",
+    "MESSAGE_TOO_LONG": "The AI advice was too long, so this is standard advice. You can ask again.",
+    "UNSAFE_MARKUP": "The AI advice was not plain text, so this is standard advice. You can ask again.",
+    "UNSUPPORTED_CLAIM": "The AI said something your sales do not show, so this is standard advice. You can ask again.",
+    "HARD_TO_READ": "The AI advice was too hard to read, so this is standard advice. You can ask again.",
 }
 
 # M3 9.6 trendPhrase.
@@ -118,9 +122,17 @@ class GuidanceEngine:
         if rule is None:
             result = check_grounding(raw, evidence)
             rule, messages = result.failed_rule, result.messages
+            if rule is None:
+                # NFR-734: displayed guidance <= 150 words and grade <= 8, else withheld (as FR-504).
+                text = " ".join(messages.values())
+                if len(readability.words(text)) > MAX_GUIDANCE_WORDS:
+                    rule = "MESSAGE_TOO_LONG"
+                elif readability.grade(text) > MAX_GUIDANCE_GRADE:
+                    rule = "HARD_TO_READ"
         if rule:
             # Rule code and provider name only: raw prompts, responses and sales stay out of logs.
-            logger.warning("Guidance used template fallback (rule=%s, provider=%s)", rule, self._provider.name)
+            logger.warning("Guidance used template fallback (rule=%s, provider=%s)", rule, self._provider.name,
+                           extra={"operation": "guidance.wording", "errorCategory": rule, "rule": rule})
 
         items = [GuidanceItem(
             itemName=estimate.itemName, suggestedQty=estimate.suggestedQty,

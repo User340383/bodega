@@ -19,8 +19,10 @@ from .database import connect
 OPEN_STATES = ('NEEDS_VERIFICATION', 'AI_UNAVAILABLE', 'REJECTED')
 PROCESSING_STATES = ('UPLOADED', 'CLASSIFYING')
 STALE_SECONDS = 120
+NOT_FOUND = "We could not find that sales log. It may have been deleted."
+DAMAGED_DRAFT = "This draft is damaged. Discard it and capture the sales again."
 RETENTION_DAYS = 30
-STALE_MESSAGE = "AI reading is temporarily unavailable. You can type the sales below."
+STALE_MESSAGE = "AI reading is temporarily unavailable. Type your sales in the form below. We kept your input."
 
 
 def owner_id():
@@ -42,20 +44,20 @@ def _normalize_draft(submission_id, payload):
     if payload is None:
         return None
     if not isinstance(payload, dict) or not isinstance(payload.get('lines', []), list):
-        raise HTTPException(400, "Draft lines must be a list")
+        raise HTTPException(400, DAMAGED_DRAFT)
     used = set()
     for line in payload.get('lines', []):
         if not isinstance(line, dict):
-            raise HTTPException(400, "Each draft row must be an object")
+            raise HTTPException(400, DAMAGED_DRAFT)
         line_id = line.get('lineId')
         if line_id is not None:
             valid_int = isinstance(line_id, int) and not isinstance(line_id, bool) and line_id >= 1
             valid_str = isinstance(line_id, str) and line_id.strip()
             if not (valid_int or valid_str) or _line_key(line_id) in used:
-                raise HTTPException(400, "Draft line IDs must be unique positive integers or nonblank strings")
+                raise HTTPException(400, DAMAGED_DRAFT)
             used.add(_line_key(line_id))
         if line.get('bands') is not None and not isinstance(line['bands'], dict):
-            raise HTTPException(400, "Draft confidence bands must be an object")
+            raise HTTPException(400, DAMAGED_DRAFT)
     lines = []
     for index, line in enumerate(payload.get('lines', [])):
         line_id = line.get('lineId')
@@ -101,7 +103,7 @@ def get_capture_input(submission_id):
         row = conn.execute("SELECT input_type, image_key, masked_text FROM submissions WHERE id=%s AND owner_id=%s",
                            (submission_id, owner_id())).fetchone()
         if row is None:
-            raise HTTPException(404, "Submission not found")
+            raise HTTPException(404, NOT_FOUND)
         return row
 
 
@@ -118,7 +120,7 @@ def update_status(submission_id, status, *, draft_payload=None, expected_status=
         current = conn.execute("SELECT status FROM submissions WHERE id=%s AND owner_id=%s FOR UPDATE",
                                (submission_id, owner_id())).fetchone()
         if current is None:
-            raise HTTPException(404, "Submission not found")
+            raise HTTPException(404, NOT_FOUND)
         if expected_status is not None and current[0] != expected_status:
             raise StaleTransition(current[0])
         conn.execute("UPDATE submissions SET status=%s, draft_payload=COALESCE(%s,draft_payload) WHERE id=%s",
@@ -139,7 +141,7 @@ def get_submission(submission_id):
         row = conn.execute("""SELECT id, sale_date, status, draft_payload, input_type, created_at
             FROM submissions WHERE id=%s AND owner_id=%s""", (submission_id, owner_id())).fetchone()
         if row is None:
-            raise HTTPException(404, "Submission not found")
+            raise HTTPException(404, NOT_FOUND)
         draft = _normalize_draft(row["id"], row["draft_payload"])
         result = {"submissionId": row["id"], "saleDate": row["sale_date"], "status": row["status"],
                   "createdAt": row["created_at"], "lines": (draft or {}).get("lines", []),
@@ -168,7 +170,7 @@ def save_sales_records(request, *, today=None):
         submission = conn.execute("SELECT * FROM submissions WHERE id=%s AND owner_id=%s FOR UPDATE",
                                   (request.submissionId, owner_id())).fetchone()
         if submission is None:
-            raise HTTPException(404, "Submission not found")
+            raise HTTPException(404, NOT_FOUND)
         existing = conn.execute("SELECT id FROM sales_records WHERE submission_id=%s ORDER BY line_no",
                                 (request.submissionId,)).fetchall()
         if submission['status'] == 'CONFIRMED':
@@ -216,9 +218,9 @@ def create_manual_submission(submission_id, sale_date, lines):
         row = conn.execute("SELECT owner_id, status FROM submissions WHERE id=%s FOR UPDATE", (submission_id,)).fetchone()
         if row is not None:
             if row[0] != owner_id():
-                raise HTTPException(409, "This submission ID is already in use")
+                raise HTTPException(409, "This form was already used. Start a new form and save again.")
             if row[1] != 'CONFIRMED':
-                raise HTTPException(409, "This submission already exists in another state")
+                raise HTTPException(409, "This form was already used for a draft. Open Pending drafts to finish it.")
             ids = conn.execute("SELECT id FROM sales_records WHERE submission_id=%s ORDER BY line_no",
                                (submission_id,)).fetchall()
             return [r[0] for r in ids], False
@@ -304,7 +306,7 @@ def delete_submission(submission_id):
         row = conn.execute("SELECT status, image_key FROM submissions WHERE id=%s AND owner_id=%s FOR UPDATE",
                            (submission_id, owner_id())).fetchone()
         if row is None:
-            raise HTTPException(404, "Submission not found")
+            raise HTTPException(404, NOT_FOUND)
         if row[0] in PROCESSING_STATES:
             raise HTTPException(409, "This sales log is still being read. Try again in a moment.")
         deleted = conn.execute("SELECT count(*) FROM sales_records WHERE submission_id=%s", (submission_id,)).fetchone()[0]
