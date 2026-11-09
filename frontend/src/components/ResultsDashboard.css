@@ -1,60 +1,57 @@
-.results-dashboard { --series-sales: #3a9a78; --series-average: #bb6c1d; --ink-muted: #5a6b62; --hairline: #d2ddd5; }
-.results-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1rem; }
-.results-controls label { display: inline-flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-.results-dashboard button.secondary { background: white; color: #235c43; }
-.results-body { transition: opacity .15s; }
-.results-body.is-stale { opacity: .55; }
-.results-scope { margin: .5rem 0; }
-.results-status { background: #eef3ef; border-left: 4px solid #235c43; padding: .6rem .8rem; margin: .5rem 0; }
-.results-basis { color: var(--ink-muted); font-size: 1rem; margin: .4rem 0; }
+/* Results dashboard and chart (Diushen), written with Tailwind utilities. SVG fills use the
+   theme colors through CSS variables so the chart and its legend always match. */
+@reference "../index.css";
 
-.item-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
-.item-card { border: 1px solid var(--hairline); border-radius: 8px; padding: 1rem; min-width: 0; }
-.item-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
-.item-heading h4 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
-.item-figures { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: .8rem 0 .4rem; }
-.item-figures dt { color: var(--ink-muted); font-size: 1rem; }
-.item-figures dd { margin: 0; font-size: 1.25rem; font-weight: 600; overflow-wrap: anywhere; }
-.item-note { color: var(--ink-muted); font-size: 1rem; margin: .3rem 0 .6rem; }
+.results-controls { @apply mb-4 flex flex-wrap items-center gap-2; }
+.results-controls label { @apply inline-flex flex-wrap items-center gap-2; }
+.results-dashboard button.secondary { @apply bg-white text-brand; }
+.results-body { @apply transition-opacity duration-150; }
+.results-body.is-stale { @apply opacity-55; }
+.results-scope { @apply my-2; }
+.results-status { @apply my-2 border-l-4 border-brand bg-[#eef3ef] px-[0.8rem] py-[0.6rem]; }
+.results-basis { @apply my-[0.4rem] text-base text-ink-muted; }
 
-.trend-badge { display: inline-flex; align-items: center; gap: .3rem; padding: .15rem .55rem; border: 1px solid currentColor; border-radius: 999px; font-size: 1rem; font-weight: 600; white-space: nowrap; }
-.trend-up { color: #1c6b4c; background: #e7f4ee; }
-.trend-down { color: #a02323; background: #fbecec; }
-.trend-stable { color: #3c4f60; background: #eef1f4; }
-.trend-unknown { color: #6b5a12; background: #fff8dc; border-style: dashed; }
+.item-grid { @apply grid grid-cols-[repeat(auto-fit,minmax(min(100%,420px),1fr))] gap-4; }
+.item-card { @apply min-w-0 rounded-lg border border-line p-[0.7rem] md:p-4; }
+.item-heading { @apply flex flex-wrap items-center justify-between gap-2; }
+.item-heading h4 { @apply m-0 text-[1.1rem] wrap-anywhere; }
+.item-figures { @apply mt-[0.8rem] mb-[0.4rem] flex flex-wrap gap-x-6 gap-y-2; }
+.item-figures dt { @apply text-base text-ink-muted; }
+.item-figures dd { @apply m-0 text-xl font-semibold wrap-anywhere; }
+.item-note { @apply mt-[0.3rem] mb-[0.6rem] text-base text-ink-muted; }
 
-.trend-chart { min-width: 0; }
-.trend-chart svg { display: block; width: 100%; height: auto; }
-.chart-grid { stroke: var(--hairline); stroke-width: 1; }
-.chart-text { fill: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.chart-bar { fill: var(--series-sales); }
-.chart-absent { fill: white; stroke: var(--ink-muted); stroke-width: 1.5; }
-.chart-gap { stroke: var(--ink-muted); stroke-width: 2; }
-.chart-average { fill: none; stroke: var(--series-average); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart-average-end { fill: var(--series-average); stroke: white; stroke-width: 2; }
+.trend-badge { @apply inline-flex items-center gap-[0.3rem] rounded-full border border-current px-[0.55rem] py-[0.15rem] text-base font-semibold whitespace-nowrap; }
+.trend-up { @apply bg-[#e7f4ee] text-[#1c6b4c]; }
+.trend-down { @apply bg-[#fbecec] text-danger; }
+.trend-stable { @apply bg-[#eef1f4] text-[#3c4f60]; }
+.trend-unknown { @apply border-dashed bg-note text-[#6b5a12]; }
+
+.trend-chart { @apply min-w-0; }
+.trend-chart svg { @apply block h-auto w-full max-md:overflow-visible; }
+.chart-grid { stroke: var(--color-line); stroke-width: 1; }
+.chart-text { @apply text-[20px] tabular-nums md:text-[12px]; fill: var(--color-ink-muted); } /* SVG units. */
+.chart-bar { fill: var(--color-series-sales); }
+.chart-absent { fill: white; stroke: var(--color-ink-muted); stroke-width: 1.5; }
+.chart-gap { stroke: var(--color-ink-muted); stroke-width: 2; }
+.chart-average { fill: none; stroke: var(--color-series-average); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-average-end { fill: var(--color-series-average); stroke: white; stroke-width: 2; }
 .chart-active { fill: #eef3ef; }
-.chart-hit { fill: transparent; cursor: default; }
-.chart-readout { color: var(--ink-muted); font-size: 1rem; min-height: 2.4em; margin: .3rem 0; }
-.chart-unavailable { background: #fff8dc; padding: .6rem .8rem; }
-.chart-legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; list-style: none; margin: .3rem 0 .6rem; padding: 0; font-size: 1rem; }
-.chart-legend li { display: inline-flex; align-items: center; gap: .4rem; }
-.key { display: inline-block; flex: none; }
-.key-bar { width: 10px; height: 12px; background: var(--series-sales); border-radius: 2px 2px 0 0; }
-.key-line { width: 18px; height: 2px; background: var(--series-average); }
-.key-absent { width: 9px; height: 9px; border: 1.5px solid var(--ink-muted); border-radius: 50%; }
-.key-gap { width: 2px; height: 14px; background: var(--ink-muted); }
-.trend-chart details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
-.trend-chart td { overflow-wrap: anywhere; }
+.chart-hit { @apply cursor-default; fill: transparent; }
+.chart-readout { @apply my-[0.3rem] min-h-[2.4em] text-base text-ink-muted; }
+.chart-unavailable { @apply bg-note px-[0.8rem] py-[0.6rem]; }
+.chart-legend { @apply mt-[0.3rem] mb-[0.6rem] flex list-none flex-wrap gap-x-4 gap-y-[0.3rem] p-0 text-base; }
+.chart-legend li { @apply inline-flex items-center gap-[0.4rem]; }
+.key { @apply inline-block flex-none; }
+.key-bar { @apply h-3 w-[10px] rounded-t-[2px] bg-series-sales; }
+.key-line { @apply h-0.5 w-[18px] bg-series-average; }
+.key-absent { @apply size-[9px] rounded-full border-[1.5px] border-ink-muted; }
+.key-gap { @apply h-[14px] w-0.5 bg-ink-muted; }
+.trend-chart details summary { @apply flex min-h-11 items-center; }
+.trend-chart td { @apply wrap-anywhere; }
 
-.guidance-panel { border-top: 1px solid var(--hairline); margin-top: 1.25rem; padding-top: 1rem; }
-.guidance-panel h3 { margin-top: 0; }
-.guidance-intro, .guidance-reason { color: var(--ink-muted); font-size: 1rem; }
-.guidance-items { padding-left: 1.2rem; }
-.guidance-items li { margin: .4rem 0; overflow-wrap: anywhere; }
-.stock-notice { background: #fff8dc; border-left: 4px solid #bb6c1d; padding: .6rem .8rem; }
-
-@media (max-width: 600px) {
-  .item-card { padding: .7rem; }
-  .chart-text { font-size: 20px; } /* SVG units: about 10px on screen at phone width. */
-  .trend-chart svg { overflow: visible; }
-}
+.guidance-panel { @apply mt-5 border-t border-line pt-4; }
+.guidance-panel h3 { @apply mt-0; }
+.guidance-intro, .guidance-reason { @apply text-base text-ink-muted; }
+.guidance-items { @apply list-disc pl-5; }
+.guidance-items li { @apply my-[0.4rem] wrap-anywhere; }
+.stock-notice { @apply border-l-4 border-focus bg-note px-[0.8rem] py-[0.6rem]; }
