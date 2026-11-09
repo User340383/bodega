@@ -23,11 +23,15 @@ PNG_MAGIC = b"\x89PNG"
 MASK = "[removed]"
 
 # Milestone 3, section 9.5. Applied before the email pattern.
+# The alternatives are M3's. Its boundaries were (?<![\w.,]) and (?![\w.,]), which also rejected
+# ordinary punctuation: "call 555-123-4567, thanks" or a number ending a sentence went to the AI
+# unmasked (SRS AC-19). A "." or "," now blocks a match only when a digit follows/precedes it,
+# which is what keeps decimals and thousands ("1,250.75", "1234567.89") from being masked.
 PHONE_PATTERN = re.compile(
-    r"(?<![\w.,])(?:\+\d{1,3}[\s.-]?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}"
+    r"(?<!\w)(?<!\d[.,])(?:\+\d{1,3}[\s.-]?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}"
     r"|(?:\(\d{3}\)\s?|\d{3}[.-])\d{3}[.-]\d{4}"
     r"|\d{3}-\d{4}"
-    r"|\+?\d{10,15})(?![\w.,])"
+    r"|\+?\d{10,15})(?!\w)(?![.,]\d)"
 )
 EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 

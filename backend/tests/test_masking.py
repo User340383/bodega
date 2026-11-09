@@ -52,3 +52,21 @@ def test_numbers_with_fewer_than_seven_digits_and_dates_are_unchanged(text):
 def test_mixed_log_keeps_sales_and_masks_only_contacts():
     log = "Bread 3 1.50\nCall Ana 809-555-1234 or ana@example.com\nMilk 2 2.25"
     assert mask_text(log) == "Bread 3 1.50\nCall Ana [removed] or [removed]\nMilk 2 2.25"
+
+
+def test_srs_ac19_example_exactly():
+    """SRS AC-19: the text sent to the AI is exactly this; "Sold 120 bread" is unchanged."""
+    assert mask_text("Sold 3 bread to Ana 555-123-4567, ana@mail.com") == "Sold 3 bread to Ana [removed], [removed]"
+    assert mask_text("Sold 120 bread") == "Sold 120 bread"
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Regression: the M3 boundaries left a number unmasked before a comma or a full stop.
+    ("Call 809-555-1234.", "Call [removed]."), ("Call 809-555-1234, thanks", "Call [removed], thanks"),
+    ("Tel: 8095551234,", "Tel: [removed],"), ("(809) 555-1234;", "[removed];"), ("Ana,809-555-1234", "Ana,[removed]"),
+    # Decimals and thousands must still survive.
+    ("Total 1234567.89", "Total 1234567.89"), ("Sold 1,234,567 units", "Sold 1,234,567 units"),
+    ("Batch 12345678901.5", "Batch 12345678901.5"),
+])
+def test_punctuation_around_numbers(text, expected):
+    assert mask_text(text) == expected
