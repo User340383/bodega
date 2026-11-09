@@ -30,7 +30,7 @@ describe('Standalone manual entry (FR-104)', () => {
     expect(options.method).toBe('POST')
     expect(options.body.submissionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(options.body).toMatchObject({ saleDate: '2026-04-30', lines: [
-      { itemName: 'Rice (lb)', quantity: '2.25', unitPrice: '0.80' }, { itemName: 'Milk', quantity: '1', unitPrice: '1.20' }] })
+      { itemName: 'Rice (lb)', quantity: 2.25, unitPrice: 0.8 }, { itemName: 'Milk', quantity: 1, unitPrice: 1.2 }] })
     expect(await screen.findByText('Sales saved. 2 records created.')).toBeInTheDocument()
     expect(onSaved).toHaveBeenCalledOnce()
   })

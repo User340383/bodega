@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg import sql
 
 from app.database import connect, migrate
@@ -36,7 +35,8 @@ def db(monkeypatch):
 
 @pytest.fixture
 def client(db):
-    with TestClient(app, raise_server_exceptions=False) as client:
+    from conftest import ExactClient
+    with ExactClient(app, raise_server_exceptions=False) as client:
         client.headers['Authorization'] = 'Bearer test-code'
         yield client
 

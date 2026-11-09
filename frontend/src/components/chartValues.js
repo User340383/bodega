@@ -1,5 +1,5 @@
-// Numbers from the API are exact decimal strings. Everything displayed as a value shows those
-// strings. Number is used only to position chart marks, and only after these checks.
+// Amounts arrive as exact JSON numbers (strings in older responses). Values are displayed as
+// received. Number is used only to position chart marks, and only after these checks.
 
 const ZERO_TEXT = /^0*\.?0*$/
 

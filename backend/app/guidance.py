@@ -1,5 +1,7 @@
 """GuidanceEngine: optional provider wording around figures the backend already calculated."""
 import logging
+from decimal import Decimal
+from fractions import Fraction
 import queue
 import threading
 from typing import Literal
@@ -55,9 +57,9 @@ TREND_PHRASES = {
 
 class GuidanceItem(BaseModel):
     itemName: str
-    suggestedQty: str
-    currentAverage: str
-    previousAverage: str | None
+    suggestedQty: Decimal
+    currentAverage: Decimal
+    previousAverage: Decimal | None
     trend: Trend
     message: str  # Plain text. Clients must render it as text, never as HTML.
 
@@ -72,6 +74,9 @@ class GuidanceResponse(BaseModel):
     failedRule: str | None
     failureReason: str | None
     providerCalled: bool
+    # NFR-734: advice is limited to 150 words, so it covers the items with the highest suggested
+    # stock that fit; this many eligible items were left out (their figures stay on the dashboard).
+    omittedItems: int = 0
     provider: str | None
     stockNotice: str
 
@@ -100,20 +105,43 @@ def _instructions() -> str:
     )
 
 
+def _text(value):
+    return None if value is None else format(value, "f")
+
+
+def select_for_guidance(eligible: list[ItemEstimate]) -> list[ItemEstimate]:
+    """Items whose advice fits NFR-734's 150 words, using the fixed M3 template as the budget.
+
+    The M3 template is about 28 words per item, so 6 or more items cannot all fit. Items with the
+    highest suggested stock come first (ties by name). Only the selected items are sent to the
+    provider, so M3 9.6 rule 1 (every item sent appears exactly once) still holds.
+    """
+    ordered = sorted(eligible, key=lambda e: (-Fraction(e.suggestedQty), e.itemName.casefold()))
+    chosen, used = [], 0
+    for estimate in ordered:
+        words = len(readability.words(template_message(estimate)))
+        if chosen and used + words > MAX_GUIDANCE_WORDS:
+            break
+        chosen.append(estimate)
+        used += words
+    return chosen
+
+
 class GuidanceEngine:
     def __init__(self, provider: WordingProvider, timeout_seconds: float = PROVIDER_TIMEOUT_SECONDS):
         self._provider = provider
         self._timeout_seconds = timeout_seconds
 
     def generate(self, analysis: AnalysisResponse) -> GuidanceResponse:
-        eligible = [estimate for estimate in analysis.estimates if estimate.suggestedQty is not None]
+        eligible = select_for_guidance([e for e in analysis.estimates if e.suggestedQty is not None])
+        omitted = sum(e.suggestedQty is not None for e in analysis.estimates) - len(eligible)
         if not eligible:
             return self._response(analysis, "INSUFFICIENT_HISTORY", [], "INSUFFICIENT_HISTORY", provider_called=False)
 
         evidence = tuple(ItemEvidence(
-            itemName=estimate.itemName, suggestedQty=estimate.suggestedQty,
-            currentAverage=estimate.currentAverage, previousAverage=estimate.previousAverage,
-            trend=estimate.trend, changePercent=estimate.changePercent,
+            itemName=estimate.itemName, suggestedQty=_text(estimate.suggestedQty),
+            currentAverage=_text(estimate.currentAverage), previousAverage=_text(estimate.previousAverage),
+            trend=estimate.trend, changePercent=_text(estimate.changePercent),
             windowLoggedDays=estimate.windowLoggedDays, averageOneDecimal=estimate.currentAverageDisplay,
         ) for estimate in eligible)
 
@@ -140,7 +168,7 @@ class GuidanceEngine:
             trend=estimate.trend,
             message=messages[normalize_item(estimate.itemName)] if messages else template_message(estimate),
         ) for estimate in eligible]
-        return self._response(analysis, "READY", items, rule, provider_called=True)
+        return self._response(analysis, "READY", items, rule, provider_called=True, omitted=omitted)
 
     def _call_provider(self, request: WordingRequest) -> tuple[str | None, str | None]:
         """One attempt, no retry. A daemon thread bounds the wait even if a provider blocks in
@@ -161,12 +189,12 @@ class GuidanceEngine:
         except queue.Empty:
             return None, "PROVIDER_TIMEOUT"
 
-    def _response(self, analysis, status, items, rule, *, provider_called) -> GuidanceResponse:
+    def _response(self, analysis, status, items, rule, *, provider_called, omitted=0) -> GuidanceResponse:
         return GuidanceResponse(
             asOf=analysis.asOf.isoformat(), status=status, items=items,
             source="TEMPLATE" if rule else "AI_WORDED", sourceLabel=TEMPLATE_LABEL if rule else None,
             groundingPassed=rule is None,
             failedRule=rule, failureReason=FAILURE_REASONS.get(rule),
             providerCalled=provider_called, provider=self._provider.name if provider_called else None,
-            stockNotice=STOCK_NOTICE,
+            stockNotice=STOCK_NOTICE, omittedItems=omitted,
         )

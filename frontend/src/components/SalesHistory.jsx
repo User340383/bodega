@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+// Amounts arrive as exact JSON numbers (M3 4.2); money is shown with 2 decimals.
+const money = value => Number(value).toFixed(2)
 const SOURCE_LABELS = { AI_EXTRACTED: 'Read by AI, checked by you', MANUAL: 'Typed by you' }
 
 // Gabriel: confirmed sales ledger (FR-303, M3 4.3 /history). GET /api/v1/sales returns the last
@@ -92,8 +94,8 @@ export default function SalesHistory({ request, revision = 0 }) {
         <thead><tr><th scope="col">Sales date</th><th scope="col">Item</th><th scope="col">Quantity</th>
           <th scope="col">Unit price</th><th scope="col">Line total</th><th scope="col">Source</th><th scope="col">Actions</th></tr></thead>
         <tbody>{records.map(record => <tr key={record.recordId}>
-          <td>{record.saleDate}</td><td>{record.itemName}</td><td>{record.quantity}</td><td>{record.unitPrice}</td>
-          <td>{record.lineTotal}</td><td>{SOURCE_LABELS[record.source] || record.source}</td>
+          <td>{record.saleDate}</td><td>{record.itemName}</td><td>{String(record.quantity)}</td><td>{money(record.unitPrice)}</td>
+          <td>{money(record.lineTotal)}</td><td>{SOURCE_LABELS[record.source] || record.source}</td>
           <td>{record.lineNo === 1 && <button type="button" className="secondary" onClick={() => askDelete(record)}
             aria-label={`Delete submission from ${record.saleDate} starting with ${record.itemName}`}>Delete submission</button>}</td>
         </tr>)}</tbody>

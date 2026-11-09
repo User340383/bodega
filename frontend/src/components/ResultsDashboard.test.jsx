@@ -350,3 +350,12 @@ describe('Chart value conversion', () => {
     expect(axisMaximum(1.7e308)).toBeNull()
   })
 })
+
+describe('Results dashboard advice length (NFR-734)', () => {
+  it('says when advice covers only some items', async () => {
+    const user = userEvent.setup()
+    render(<ResultsDashboard request={router({ guidance: guidanceResult({ omittedItems: 3 }) })} revision={0} />)
+    await user.click(await guidanceButton())
+    expect(await screen.findByText(/Advice covers the 1 items with the highest suggested stock/)).toBeInTheDocument()
+  })
+})

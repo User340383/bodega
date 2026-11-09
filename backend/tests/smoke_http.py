@@ -4,10 +4,12 @@ Exercises the deployed contract end to end against a real backend and PostgreSQL
 envelope, extraction fallback, confirmation idempotency, standalone manual entry, pending
 drafts, deletion, the ledger, request IDs and authentication.
 """
+import json
 import os
 import time
 import uuid
 from datetime import date
+from decimal import Decimal
 
 import httpx
 
@@ -52,10 +54,11 @@ with httpx.Client(base_url=os.environ['API_URL'], headers={'Authorization': 'Bea
     assert created.status_code == 201, created.text
     assert client.post('/api/v1/manual-entries', json=manual).json()['recordIds'] == created.json()['recordIds']
 
-    saved = client.get('/api/v1/sales').raise_for_status().json()['records']
+    # M3 4.2: amounts are JSON numbers; parse them as Decimal so nothing is rounded.
+    saved = json.loads(client.get('/api/v1/sales').raise_for_status().text, parse_float=Decimal)['records']
     rows = [row for row in saved if row['submissionId'] == sid]
-    assert len(rows) == 1 and rows[0]['quantity'] == '2.5' and rows[0]['unitPrice'] == '1.20'
-    assert rows[0]['lineTotal'] == '3.000'
+    assert len(rows) == 1 and rows[0]['quantity'] == Decimal('2.5') and rows[0]['unitPrice'] == Decimal('1.20')
+    assert rows[0]['lineTotal'] == Decimal('3.000')
     detail = client.get('/api/v1/submissions/' + sid).json()
     assert detail['status'] == 'CONFIRMED' and len(detail['records']) == 1
 

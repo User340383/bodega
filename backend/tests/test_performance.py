@@ -63,6 +63,7 @@ def test_ledger_and_guidance_stay_responsive_at_5000_records(client):
     assert ledger.status_code == 200 and len(ledger.json()['records']) == RECORDS
     started_guidance = time.monotonic()
     guidance = client.post('/api/v1/guidance', json={})  # No provider configured: template wording.
-    assert guidance.status_code == 200 and len(guidance.json()['items']) == ITEMS
+    body = guidance.json()
+    assert guidance.status_code == 200 and len(body['items']) + body['omittedItems'] == ITEMS  # NFR-734 budget
     print(f'\nledger {started_guidance - started:.3f} s, guidance {time.monotonic() - started_guidance:.3f} s')
     assert time.monotonic() - started < 6.0

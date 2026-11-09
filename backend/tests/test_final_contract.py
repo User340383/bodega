@@ -361,3 +361,21 @@ def test_ai_storage_and_database_failures_log_every_nfr_723_field(client, caplog
     everything = '\n'.join(json.dumps(line) for line in lines)
     for forbidden in ('809-555-1234', 'Bread 3', 'test-code', '[removed]'):
         assert forbidden not in everything
+
+
+def test_amounts_are_exact_json_numbers_and_bands_stay_text(client):
+    """M3 4.2: money and quantities are JSON numbers parsed as Decimal; never floats, never strings."""
+    from app.vision import ExtractedLine, ExtractionResult, MockVisionModel, get_vision_model
+    model = MockVisionModel(canned=ExtractionResult(overallConfidence=0.9, lines=[ExtractedLine(
+        itemName='Rice', quantity='2.25', unitPrice='0.80', itemNameConfidence=0.9, quantityConfidence=0.7,
+        unitPriceConfidence=0.3)]))
+    app.dependency_overrides[get_vision_model] = lambda: model
+    draft = client.post('/api/v1/extract', data={'saleDate': AS_OF.isoformat(), 'text': 'Rice 2.25 0.80'})
+    raw = draft.text
+    assert '"quantity":2.25' in raw and '"quantity":"MEDIUM"' in raw and '"unitPrice":"LOW"' in raw
+    client.post('/api/v1/manual-entries', json={'submissionId': str(uuid4()), 'saleDate': AS_OF.isoformat(),
+                                               'lines': [line(quantity=99999.99, unitPrice=9999999.99)]})
+    ledger = client.get('/api/v1/sales').text
+    assert '"quantity":99999.99' in ledger and '"unitPrice":9999999.99' in ledger
+    assert '"lineTotal":999999899000.0001' in ledger  # Exact: a float would print 999999899000.0002.
+    assert '"quantity":"' not in ledger and '"unitPrice":"' not in ledger

@@ -43,7 +43,8 @@ export default function DraftReview({ draft, request, onConfirmed }) {
         body: JSON.stringify({ submissionId: draft.submissionId, lines: rows.map(row => ({
           draftLineId: row.extracted ? row.lineId : null, source: row.extracted ? 'AI_EXTRACTED' : 'MANUAL',
           itemName: row.itemName.trim(),
-          quantity: row.quantity.trim(), unitPrice: row.unitPrice.trim(), verifiedFields: row.verifiedFields,
+          // M3 4.2: JSON numbers. Exact here: values are validated to at most 2 decimal places.
+          quantity: Number(row.quantity.trim()), unitPrice: Number(row.unitPrice.trim()), verifiedFields: row.verifiedFields,
         })) }),
       })
       setResult(response)

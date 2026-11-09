@@ -12,6 +12,9 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
 
+from decimal import Decimal
+import json as _json
+
 from app.clock import get_clock
 from app.database import migrate
 from app.main import app
@@ -25,6 +28,37 @@ class FixedClock:
 
     def today(self):
         return self._today
+
+
+AMOUNT_KEYS = {"quantity", "unitPrice", "lineTotal", "currentAverage", "currentTotal", "previousAverage",
+               "previousTotal", "changePercent", "suggestedQty", "movingAverage"}
+
+
+def _t(value):
+    """Exact canonical text of an amount (Decimal or int), for exact comparisons in tests."""
+    if isinstance(value, (Decimal, int)) and not isinstance(value, bool):
+        return format(Decimal(value), "f")
+    return value
+
+
+def amounts_as_text(value):
+    """Parsed JSON with every amount turned back into exact text. Numbers are parsed with
+    Decimal, never float, so "1.20" stays "1.20" and 99999.99 stays exact."""
+    if isinstance(value, dict):
+        return {key: (_t(item) if key in AMOUNT_KEYS else amounts_as_text(item)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [amounts_as_text(item) for item in value]
+    return value
+
+
+class ExactClient(TestClient):
+    """TestClient whose .json() parses numbers exactly (M3 4.2: amounts are JSON numbers)."""
+
+    def request(self, *args, **kwargs):
+        response = super().request(*args, **kwargs)
+        text = response.text
+        response.json = lambda **_: amounts_as_text(_json.loads(text, parse_float=Decimal)) if text else None
+        return response
 
 
 @pytest.fixture
@@ -51,7 +85,7 @@ def db(monkeypatch):
 def client(db):
     app.dependency_overrides[get_clock] = lambda: FixedClock(AS_OF)
     try:
-        with TestClient(app, raise_server_exceptions=False) as test_client:
+        with ExactClient(app, raise_server_exceptions=False) as test_client:
             test_client.headers['Authorization'] = 'Bearer test-code'
             yield test_client
     finally:

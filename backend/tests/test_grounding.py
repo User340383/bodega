@@ -13,7 +13,7 @@ from app.analysis import build_analysis
 from app.grounding import MAX_MESSAGE_CHARS, check_grounding
 from app.guidance import GuidanceEngine, STOCK_NOTICE, template_message
 from app.llm import ItemEvidence, MockLLMService, MockScenario, UnavailableWordingProvider
-from conftest import AS_OF, logged_dates
+from conftest import _t, AS_OF, logged_dates
 
 START = date(2026, 4, 3)
 BREAD = ItemEvidence('Bread', '28', '4', '2', 'UP', '100', 7)
@@ -155,7 +155,7 @@ def test_valid_mock_wording_is_used_with_authoritative_fields():
     result = GuidanceEngine(provider).generate(analysis())
     assert (result.source, result.groundingPassed, result.failedRule, result.provider) == ('AI_WORDED', True, None, 'mock')
     bread = result.items[0]
-    assert (bread.itemName, bread.suggestedQty, bread.trend) == ('Bread', '28', 'UP')
+    assert (bread.itemName, _t(bread.suggestedQty), bread.trend) == ('Bread', '28', 'UP')
     assert bread.message == ('Bread: plan 28 units to cover 7 logged sales dates. '
                              'Average is 4 per logged date. Sales trend is up.')
     assert result.stockNotice == STOCK_NOTICE
@@ -178,7 +178,7 @@ def test_every_mock_failure_falls_back_to_a_labeled_template(scenario, rule):
     assert (result.source, result.groundingPassed, result.failedRule) == ('TEMPLATE', False, rule)
     assert result.failureReason and result.providerCalled
     assert [item.message for item in result.items] == [template_message(e) for e in source.estimates]
-    assert result.items[0].suggestedQty == '28'
+    assert _t(result.items[0].suggestedQty) == '28'
     assert len(provider.calls) == 1  # No automatic retry.
 
 
@@ -214,7 +214,7 @@ def test_no_provider_call_without_an_eligible_estimate(days):
 def test_seven_to_thirteen_dates_get_guidance_without_a_trend_claim():
     result = GuidanceEngine(MockLLMService()).generate(analysis(9))
     assert result.source == 'AI_WORDED'
-    assert all(item.trend == 'INSUFFICIENT_DATA' and item.previousAverage is None for item in result.items)
+    assert all(item.trend == 'INSUFFICIENT_DATA' and _t(item.previousAverage) is None for item in result.items)
     assert 'trend is' not in result.items[0].message
     assert 'not enough history' in template_message(analysis(9).estimates[0])
 
@@ -273,7 +273,7 @@ class TemplateEcho:
         self.messages = {e.itemName: template_message(e) for e in estimates}
 
     def generate(self, request):
-        return json.dumps({'items': [{'itemName': item.itemName, 'suggestedQty': item.suggestedQty,
+        return json.dumps({'items': [{'itemName': item.itemName, 'suggestedQty': _t(item.suggestedQty),
                                       'message': self.messages[item.itemName]} for item in request.items]})
 
 

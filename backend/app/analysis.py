@@ -55,11 +55,13 @@ class AnalysisWindow(BaseModel):
     loggedDays: int
 
 
+# Quantities and averages are exact Decimals and leave the API as JSON numbers (M3 4.2);
+# the strings from decimal_text are parsed exactly by pydantic.
 class SeriesPoint(BaseModel):
     date: date
-    quantity: str
+    quantity: Decimal
     observed: bool  # False: the business logged this date without the item, so it counts as 0.
-    movingAverage: str | None
+    movingAverage: Decimal | None
     movingAverageRounded: bool
     calendarDaysSkipped: int  # Unlogged calendar days since the previous logged date.
 
@@ -68,19 +70,19 @@ class ItemEstimate(BaseModel):
     itemKey: str
     itemName: str
     windowLoggedDays: int
-    currentAverage: str | None
+    currentAverage: Decimal | None
     currentAverageRounded: bool
     # M3 4.3/9.6: the average shown to the owner, rounded half-up to 1 decimal.
     currentAverageDisplay: str | None
-    currentTotal: str | None
+    currentTotal: Decimal | None
     currentDaysWithSales: int | None
-    previousAverage: str | None
+    previousAverage: Decimal | None
     previousAverageRounded: bool
-    previousTotal: str | None
+    previousTotal: Decimal | None
     previousDaysWithSales: int | None
     trend: Trend
-    changePercent: str | None
-    suggestedQty: str | None
+    changePercent: Decimal | None
+    suggestedQty: Decimal | None
     series: list[SeriesPoint]
 
 

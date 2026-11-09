@@ -117,3 +117,30 @@ def test_short_plain_ai_guidance_is_shown():
 def test_privacy_messages_are_collected():
     assert any("JPEG or PNG" in text for text in MESSAGES.values())
     assert privacy.text_problem("<b>") in MESSAGES.values()
+
+
+def test_guidance_for_many_items_stays_within_150_words_and_keeps_the_top_items():
+    """NFR-734 with the fixed M3 template: 8 eligible items cannot all fit, so the advice covers
+    the items with the highest suggested stock and reports how many were left out."""
+    from app.analysis import build_analysis
+    from app.llm import UnavailableWordingProvider
+    dates = logged_dates(14)
+    records = [{"saleDate": day, "itemName": f"Item {chr(65 + index)}", "quantity": str(index + 1)}
+               for index in range(8) for day in dates]
+    result = GuidanceEngine(UnavailableWordingProvider()).generate(build_analysis(records, AS_OF, dates[0]))
+    text = " ".join(item.message for item in result.items)
+    assert len(readability.words(text)) <= 150 and readability.grade(text) <= 8.0
+    shown = [item.itemName for item in result.items]
+    assert shown == [f"Item {chr(65 + index)}" for index in range(7, 7 - len(shown), -1)]  # Highest first.
+    assert result.omittedItems == 8 - len(shown) > 0
+
+
+def test_ai_is_asked_only_about_the_items_that_will_be_shown():
+    from app.analysis import build_analysis
+    from app.llm import MockLLMService
+    dates = logged_dates(14)
+    records = [{"saleDate": day, "itemName": f"Item {chr(65 + index)}", "quantity": str(index + 1)}
+               for index in range(8) for day in dates]
+    provider = MockLLMService()
+    result = GuidanceEngine(provider).generate(build_analysis(records, AS_OF, dates[0]))
+    assert len(provider.calls[0].items) == len(result.items) == 8 - result.omittedItems

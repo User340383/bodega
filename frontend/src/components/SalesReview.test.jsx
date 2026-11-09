@@ -15,7 +15,7 @@ function review(overrides = {}, request = vi.fn(), onConfirmed = vi.fn()) {
 }
 
 describe('Draft review', () => {
-  it('requires verification, submits exact decimal strings and reports success', async () => {
+  it('requires verification, submits exact JSON numbers and reports success', async () => {
     const request = vi.fn().mockResolvedValue({ recordIds: ['saved'], created: true })
     const { user, onConfirmed } = review({}, request)
     expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeDisabled()
@@ -23,7 +23,8 @@ describe('Draft review', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
     expect(request).toHaveBeenCalledWith('/api/v1/confirm', expect.objectContaining({ method: 'POST' }))
     const body = JSON.parse(request.mock.calls[0][1].body)
-    expect(body.lines[0]).toMatchObject({ draftLineId: 'a', quantity: '3', unitPrice: '1.50', verifiedFields: ['unitPrice'] })
+    expect(body.lines[0]).toMatchObject({ draftLineId: 'a', quantity: 3, unitPrice: 1.5, verifiedFields: ['unitPrice'] })
+    expect(request.mock.calls[0][1].body).toContain('"unitPrice":1.5')  // M3 4.2: a JSON number.
     expect(await screen.findByText(/Sales saved/)).toBeInTheDocument()
     expect(onConfirmed).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Confirm sales' })).toBeDisabled()
@@ -79,7 +80,7 @@ describe('Draft review', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
     expect(request).toHaveBeenCalledTimes(1)
     const body = JSON.parse(request.mock.calls[0][1].body)
-    expect(body.lines[0]).toMatchObject({ source: 'MANUAL', draftLineId: null, quantity: '2.25', unitPrice: '0.80' })
+    expect(body.lines[0]).toMatchObject({ source: 'MANUAL', draftLineId: null, quantity: 2.25, unitPrice: 0.8 })
   })
 
   it('accepts integer line IDs from extraction (M3 7.3) and shows plain-language states', async () => {
@@ -169,7 +170,7 @@ describe('Confirmed sales ledger', () => {
     expect(await screen.findByText('Bread')).toBeInTheDocument()
     expect(screen.getByText('2.5')).toBeInTheDocument()
     expect(screen.getByText('1.20')).toBeInTheDocument()
-    expect(screen.getByText('3.000')).toBeInTheDocument()
+    expect(screen.getByText('3.00')).toBeInTheDocument()  // Money is shown with 2 decimals.
     expect(screen.getByText('Typed by you')).toBeInTheDocument()
   })
 
@@ -224,12 +225,12 @@ describe('Review contract regressions', () => {
   })
 
   it.each([['0.01', '0', 'x'], ['99999.99', '9999999.99', 'x'.repeat(100)], ['1E+2', '1.5', 'Eggs'], ['2.50', '1.20', 'Rice (lb)']])(
-    'sends boundary quantity %s exactly, without rounding', async (quantity, unitPrice, itemName) => {
+    'sends boundary quantity %s as an exact JSON number', async (quantity, unitPrice, itemName) => {
       const request = vi.fn().mockResolvedValue({ recordIds: ['a'], created: true })
       const { user } = review({ lines: [{ ...draft.lines[0], itemName, quantity, unitPrice,
         bands: { itemName: 'HIGH', quantity: 'HIGH', unitPrice: 'HIGH' } }] }, request)
       await user.click(screen.getByRole('button', { name: 'Confirm sales' }))
-      expect(JSON.parse(request.mock.calls[0][1].body).lines[0]).toMatchObject({ itemName, quantity, unitPrice })
+      expect(JSON.parse(request.mock.calls[0][1].body).lines[0]).toMatchObject({ itemName, quantity: Number(quantity), unitPrice: Number(unitPrice) })
     })
 
   it.each([

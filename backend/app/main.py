@@ -7,6 +7,7 @@ Error body for every non-2xx response (M3 4.2):
 before the envelope; it never contains submitted values.
 """
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager, suppress
 from datetime import date, timedelta
@@ -156,18 +157,48 @@ def extraction_validation_error(field, message):
     }])
 
 
-def _json_safe(value):
-    """Exact decimals leave the API as strings (see docs/INTEGRATION_DECISIONS.md, D-07)."""
+def _encode(value) -> str:
+    """JSON text in which every Decimal is an exact number token (M3 4.2: "money and quantities
+    are JSON numbers parsed as Decimal"). Nothing passes through float, so 99999.99 stays
+    99999.99; clients that need exactness parse with a Decimal number hook."""
     if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("Non-finite number")
         return format(value, "f")
     if isinstance(value, dict):
-        return {key: _json_safe(item) for key, item in value.items()}
+        return "{" + ",".join(json.dumps(str(key)) + ":" + _encode(item) for key, item in value.items()) + "}"
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, (date, UUID)):
-        return str(value)
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
+        return "[" + ",".join(_encode(item) for item in value) + "]"
+    if isinstance(value, (UUID, date)) or hasattr(value, "isoformat"):
+        return json.dumps(value.isoformat() if hasattr(value, "isoformat") else str(value))
+    if isinstance(value, BaseModel):
+        return _encode(value.model_dump(mode="python"))
+    return json.dumps(value, ensure_ascii=False, allow_nan=False)
+
+
+class NumberJSONResponse(Response):
+    media_type = "application/json"
+
+    def render(self, content) -> bytes:
+        return _encode(content).encode("utf-8")
+
+
+def _amounts_as_numbers(value):
+    """Draft rows are stored as text in JSONB; return their quantity and price as numbers."""
+    if isinstance(value, dict):
+        # Never descend into confidence bands: there "quantity" is a band name such as "LOW".
+        out = {key: item if key == "bands" else _amounts_as_numbers(item) for key, item in value.items()}
+        for field in ("quantity", "unitPrice"):
+            if isinstance(out.get(field), str):
+                try:
+                    number = Decimal(out[field])
+                except ArithmeticError:
+                    continue  # Not an amount; leave it exactly as stored.
+                if number.is_finite():
+                    out[field] = number
+        return out
+    if isinstance(value, list):
+        return [_amounts_as_numbers(item) for item in value]
     return value
 
 
@@ -310,8 +341,9 @@ def _capture_response(submission_id, storage):
     """ExtractResponse / SubmissionDetail: Gabriel's draft view plus José's capture inputs."""
     detail = repository.get_submission(submission_id)
     capture = repository.get_capture_input(submission_id)
-    return _json_safe({**detail, "inputType": capture["input_type"], "maskedText": capture["masked_text"],
-                       "imageUrl": _signed_image_url(storage, capture["image_key"])})
+    return NumberJSONResponse(_amounts_as_numbers({
+        **detail, "inputType": capture["input_type"], "maskedText": capture["masked_text"],
+        "imageUrl": _signed_image_url(storage, capture["image_key"])}))
 
 
 # A sync route: FastAPI runs it on a worker thread, so the up-to-61 s provider wait
@@ -399,7 +431,7 @@ def manual_entry(request: ManualEntryRequest, response: Response, _: None = Depe
 @app.get("/api/v1/submissions", response_model=list[OpenSubmission])
 def open_submissions(_: None = Depends(require_owner_access)):
     """Pending drafts (FR-216): NEEDS_VERIFICATION, AI_UNAVAILABLE and REJECTED, newest first."""
-    return _json_safe(repository.list_open_submissions())
+    return NumberJSONResponse(repository.list_open_submissions())
 
 
 @app.get("/api/v1/submissions/{submission_id}")
@@ -454,7 +486,7 @@ def sales(start: IsoDate | None = Query(default=None), end: IsoDate | None = Que
         raise HTTPException(400, detail=[{"loc": ["query", "start"], "msg": "Start date must be on or before the end date.", "type": "value_error"}])
     if (end - start).days + 1 > MAX_HISTORY_RANGE_DAYS:
         raise HTTPException(400, detail=[{"loc": ["query", "start"], "msg": "Choose a date range of at most 366 days.", "type": "value_error"}])
-    return {"start": start, "end": end, "records": repository.get_confirmed_records(start, end)}
+    return NumberJSONResponse({"start": start, "end": end, "records": repository.get_confirmed_records(start, end)})
 
 
 @app.get("/api/v1/analysis", response_model=AnalysisResponse)
@@ -463,7 +495,7 @@ def analysis(
     _: None = Depends(require_owner_access),
     clock: Clock = Depends(get_clock),
 ):
-    return BaselineAnalyzer().analyze(resolve_as_of(asOf, clock, ["query", "asOf"]), save_snapshots=True)
+    return NumberJSONResponse(BaselineAnalyzer().analyze(resolve_as_of(asOf, clock, ["query", "asOf"]), save_snapshots=True))
 
 
 # A sync route: FastAPI runs it on a worker thread, so waiting on a provider never blocks the event loop.
@@ -480,7 +512,7 @@ def guidance(
         # M3 4.2: 409 INSUFFICIENT_HISTORY; no provider is called (FR-503).
         raise ApiError(409, "INSUFFICIENT_HISTORY",
                        f"Log at least 7 days of sales to get advice ({analysis_result.loggedDays} of 7 so far).")
-    return GuidanceEngine(provider).generate(analysis_result)
+    return NumberJSONResponse(GuidanceEngine(provider).generate(analysis_result))
 
 
 def _openapi_with_400_validation():

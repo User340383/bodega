@@ -27,9 +27,9 @@ function average(text, rounded) {
 function changeText(estimate) {
   if (estimate.trend === 'INSUFFICIENT_DATA') return 'Needs 14 logged dates to compare.'
   if (estimate.changePercent === null) {
-    return estimate.currentAverage === '0' ? 'No sales in either period.' : 'No sales in the previous 7 logged dates.'
+    return Number(estimate.currentAverage) === 0 ? 'No sales in either period.' : 'No sales in the previous 7 logged dates.'
   }
-  const sign = estimate.changePercent.startsWith('-') || estimate.changePercent === '0' ? '' : '+'
+  const sign = Number(estimate.changePercent) <= 0 ? '' : '+'
   return `${sign}${estimate.changePercent}% against the previous 7 logged dates.`
 }
 
@@ -67,6 +67,7 @@ function GuidanceResult({ result }) {
   return <div className="guidance-result">
     {result.items.length > 0 && <p className="guidance-source"><strong>Source:</strong> {sourceLabel(result)}</p>}
     {result.failureReason && <p className="guidance-reason">{result.failureReason}</p>}
+    {result.omittedItems > 0 && <p className="guidance-reason">Advice covers the {result.items.length} items with the highest suggested stock, to keep it short. The numbers for all items are shown above.</p>}
     {result.items.length > 0 && <ul className="guidance-items">
       {result.items.map(item => <li key={item.itemName}>{item.message}</li>)}
     </ul>}

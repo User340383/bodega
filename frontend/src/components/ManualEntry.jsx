@@ -30,7 +30,7 @@ export default function ManualEntry({ request, onSaved, today = localToday }) {
     try {
       const result = await request('/api/v1/manual-entries', { method: 'POST', body: {
         submissionId, saleDate,
-        lines: rows.map(row => ({ itemName: row.itemName.trim(), quantity: row.quantity.trim(), unitPrice: row.unitPrice.trim() })),
+        lines: rows.map(row => ({ itemName: row.itemName.trim(), quantity: Number(row.quantity.trim()), unitPrice: Number(row.unitPrice.trim()) })),
       } })
       setSaved(result)
       onSaved?.(result)
