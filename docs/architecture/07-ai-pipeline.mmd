@@ -1,0 +1,50 @@
+flowchart TB
+  START(["Owner submits photo or text<br/>POST /api/v1/extract"]) --> TYPE{"Exactly one of<br/>photo or text?"}
+  TYPE -->|"No"| ERR400["400 validation error<br/>no submission, no AI call"]
+  TYPE -->|"Photo"| VIMG{"JPEG or PNG by magic bytes,<br/>max 10 MiB, valid sale date?"}
+
+  TYPE -->|"Text"| VTXT{"1 to 5000 chars,<br/>valid sale date?"}
+  VIMG -->|"No"| ERR400
+  VTXT -->|"No"| ERR400
+  VIMG -->|"Yes"| EXIF["sanitizeImage: apply orientation,<br/>re-encode pixels only as JPEG q85,<br/>long edge max 2048 px"]
+  EXIF --> STORE["putObject to private R2 bucket<br/>key = random UUID"]
+  STORE -->|"Storage error"| ERR503["503, no submission,<br/>no AI call"]
+  STORE --> UP["createSubmission<br/>status = UPLOADED"]
+  VTXT -->|"Yes"| MASK["maskText: phones and emails<br/>to [removed]"]
+  MASK --> UP
+  UP --> CLS["status = CLASSIFYING"]
+  CLS --> CALL["VisionModel call to Claude<br/>timeout 30 s, forced tool output"]
+  CALL --> OK{"Schema-valid<br/>response?"}
+  OK -->|"Timeout, 429, 5xx, network<br/>or invalid schema: attempt 1"| RETRY["Wait 1 s, attempt 2"]
+  RETRY --> CALL
+  OK -->|"Same failure on attempt 2,<br/>or 400, 401, 403"| UNAV["status = AI_UNAVAILABLE"]
+  OK -->|"Yes"| POST["maskContacts on returned text"]
+  POST --> READ{"overallConfidence<br/>at least 0.40?"}
+  READ -->|"No"| REJ["status = REJECTED<br/>retake guidance"]
+  READ -->|"Yes"| EMPTY{"At least one<br/>sales line?"}
+  EMPTY -->|"No"| REJ2["status = REJECTED<br/>'No sales lines found'"]
+  EMPTY -->|"Yes"| BAND{"Band per field"}
+  BAND -->|"0.85 or higher"| HIGH["HIGH: prefill, no warning"]
+  BAND -->|"0.60 up to 0.85"| MED["MEDIUM: prefill,<br/>'Please verify'"]
+  BAND -->|"Confidence missing"| UNS["UNSCORED: prefill,<br/>'Please verify'"]
+  BAND -->|"Below 0.60 or value missing"| LOW["LOW: blank,<br/>'Could not read - enter value'"]
+  HIGH --> REVIEW["status = NEEDS_VERIFICATION<br/>draft saved in draftPayload"]
+  MED --> REVIEW
+  UNS --> REVIEW
+  LOW --> REVIEW
+  REVIEW --> GATE{"All MEDIUM and UNSCORED<br/>fields ticked, all LOW filled?"}
+  GATE -->|"No"| REVIEW
+  UNAV --> MANUAL["Manual entry form<br/>next to photo or text"]
+  REJ -->|"Enter manually"| MANUAL
+  REJ2 -->|"Enter manually"| MANUAL
+  REJ -->|"Retake photo"| START
+  GATE -->|"Yes"| CONFIRM["POST /api/v1/confirm<br/>server-side validation"]
+  MANUAL --> CONFIRM
+  CONFIRM --> DONE(["One transaction:<br/>SALES_RECORDS rows + status CONFIRMED"])
+
+  classDef privacy fill:#E8F1FB,stroke:#2F6DB5,color:#1B3A5C
+  classDef fail fill:#FCEBEA,stroke:#B5402F,color:#5C1E16
+  classDef ok fill:#E9F5EC,stroke:#2F8A4C,color:#173F24
+  class EXIF,MASK,STORE,POST privacy
+  class ERR400,ERR503,UNAV,REJ,REJ2,LOW fail
+  class HIGH,DONE ok

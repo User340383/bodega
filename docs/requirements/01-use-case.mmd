@@ -1,0 +1,35 @@
+flowchart LR
+    Owner(["👤 Business Owner<br/>(UR-01)"])
+    AI(["⚙ External AI Service<br/>(EXT-01)"])
+
+    subgraph SYS["AI Forecasting and Organizational Tool for Informal Businesses"]
+        UC1(("UC1<br/>Submit sales-log image"))
+        UC2(("UC2<br/>Submit sales text"))
+        UC3(("UC3<br/>Enter sales manually"))
+        UC4(("UC4<br/>Review and confirm<br/>sales draft"))
+        UC5(("UC5<br/>View sales history"))
+        UC6(("UC6<br/>Delete stored<br/>sales data"))
+        UC7(("UC7<br/>View trend analysis"))
+        UC8(("UC8<br/>View restocking<br/>guidance"))
+        UC9(("UC9<br/>View results<br/>dashboard"))
+        UC10(("UC10<br/>Extract structured<br/>sales data"))
+        UC11(("UC11<br/>Generate guidance text"))
+    end
+
+    Owner --- UC1
+    Owner --- UC2
+    Owner --- UC3
+    Owner --- UC4
+    Owner --- UC5
+    Owner --- UC6
+    Owner --- UC7
+    Owner --- UC8
+    Owner --- UC9
+
+    UC1 -. "«include»" .-> UC10
+    UC2 -. "«include»" .-> UC10
+    UC10 -. "«include»" .-> UC4
+    UC3 -. "«extend» AI unavailable<br/>or unreadable input" .-> UC4
+    UC8 -. "«include»" .-> UC11
+    UC10 --- AI
+    UC11 --- AI

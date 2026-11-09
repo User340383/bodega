@@ -1,0 +1,45 @@
+erDiagram
+  OWNERS ||--o{ SUBMISSIONS : owns OWNERS ||--o{ BASELINE_ESTIMATES : receives SUBMISSIONS ||--o{ SALES_RECORDS : contains  OWNERS {
+    uuid id PK
+    varchar displayName "max 100"
+    timestamptz createdAt
+  }
+  SUBMISSIONS {
+    uuid id PK
+    uuid ownerId FK "ON DELETE CASCADE"
+    varchar inputType "IMAGE, TEXT or MANUAL"
+
+    varchar status "SubmissionStatus, CHECK"
+    date saleDate "not in future"
+    varchar imageKey "nullable, IMAGE only"
+    text maskedText "nullable, TEXT only"
+    jsonb draftPayload "nullable, cleared on confirm"
+    timestamptz createdAt
+    timestamptz updatedAt
+    timestamptz confirmedAt "nullable"
+  }
+  SALES_RECORDS {
+    uuid id PK
+    uuid submissionId FK "ON DELETE CASCADE"
+    int lineNo "1 to 100, UNIQUE with submissionId"
+    varchar itemName "1 to 100 chars, trimmed"
+    varchar itemKey "casefolded itemName"
+    numeric quantity "NUMERIC(10,2), above 0"
+    numeric unitPrice "NUMERIC(12,2), 0 or more"
+    varchar source "AI_EXTRACTED or MANUAL"
+  }
+  BASELINE_ESTIMATES {
+    uuid id PK
+    uuid ownerId FK "ON DELETE CASCADE"
+    date asOfDate "UNIQUE with ownerId, itemKey"
+    varchar itemKey
+    varchar itemName "latest spelling"
+    int windowDays "7"
+    int loggedDays
+    numeric averageDailyQuantity "NUMERIC(12,4)"
+    numeric priorAverageDailyQuantity "nullable"
+    varchar trend "TrendDirection, CHECK"
+    int coverDays "7"
+    int suggestedRestockQty "0 or more"
+    timestamptz computedAt
+  }

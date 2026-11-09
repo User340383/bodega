@@ -29,8 +29,11 @@ services:
         fromDatabase:
           name: bodega-db
           property: connectionString
+      # Empty = no AI provider: extraction falls back to manual entry, guidance to "Standard advice".
+      # Set to "claude" only after the account owner records the provider's data-use and retention
+      # terms in docs/privacy.md section 3 (NFR-716); sending sales data before that would breach it.
       - key: AI_PROVIDER
-        value: claude
+        value: ""
       - key: AI_API_KEY
         sync: false
       - key: AI_EXTRACTION_MODEL

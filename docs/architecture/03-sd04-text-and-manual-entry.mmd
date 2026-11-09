@@ -1,0 +1,36 @@
+sequenceDiagram
+  autonumber
+  actor BusinessOwner
+  participant ReactSPA
+  participant SalesCaptureController
+  participant InferenceService
+
+  participant RecordRepository
+  participant VisionModel
+  alt Typed or pasted sales text
+    BusinessOwner->>ReactSPA: Paste sales text and choose sale date
+    ReactSPA->>SalesCaptureController: POST /api/v1/extract (text, saleDate)
+    SalesCaptureController->>SalesCaptureController: validateInput(saleDate, None, text)
+    SalesCaptureController->>InferenceService: maskText(text)
+    InferenceService-->>SalesCaptureController: maskedText (phones and emails replaced)
+    SalesCaptureController->>RecordRepository: createSubmission(ownerId, TEXT, saleDate, None, maskedText)
+    RecordRepository-->>SalesCaptureController: submissionId (UPLOADED)
+    SalesCaptureController->>InferenceService: extractFromText(submissionId, maskedText)
+    InferenceService->>RecordRepository: updateStatus(submissionId, CLASSIFYING)
+    InferenceService->>VisionModel: extractFromText(maskedText, prompt, timeout=30)
+    VisionModel-->>InferenceService: ExtractionResult
+    Note over InferenceService,RecordRepository: maskContacts, applyConfidenceBands, saveDraft. Retry and AI_UNAVAILABLE exactly as SD-02
+    InferenceService-->>SalesCaptureController: SalesDraft
+    SalesCaptureController-->>ReactSPA: 200 OK ExtractResponse
+    ReactSPA-->>BusinessOwner: Draft review and confirm exactly as SD-01 steps 20 to 28
+  else Standalone manual entry (no AI)
+    BusinessOwner->>ReactSPA: Open "Enter manually", choose date, type lines
+    ReactSPA->>ReactSPA: Generate submissionId (UUID v4) once per form
+    ReactSPA->>SalesCaptureController: POST /api/v1/manual-entries (submissionId, saleDate, lines)
+    SalesCaptureController->>SalesCaptureController: validateInput(saleDate, None, None) and validateLines(lines)
+    SalesCaptureController->>RecordRepository: createManualSubmission(ownerId, submissionId, saleDate, lines)
+    RecordRepository->>RecordRepository: Insert SUBMISSIONS (MANUAL, CONFIRMED) and SALES_RECORDS (MANUAL) in one transaction
+    RecordRepository-->>SalesCaptureController: ConfirmOutcome (recordIds, created)
+    SalesCaptureController-->>ReactSPA: 201 Created, or 200 OK when submissionId already exists
+    ReactSPA-->>BusinessOwner: "Sales saved"
+  end

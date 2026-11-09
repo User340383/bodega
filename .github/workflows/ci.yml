@@ -60,6 +60,13 @@ jobs:
       - name: Ruff
         run: pipx run ruff==0.17.4 check backend
 
+      # M1/M2/M3: the Mermaid sources in docs/ are living artifacts; every one must render.
+      - name: Mermaid diagrams render
+        run: |
+          for f in docs/architecture/*.mmd docs/requirements/*.mmd; do
+            npx -y @mermaid-js/mermaid-cli@11.4.2 -p docs/.mermaid-puppeteer.json -q -i "$f" -o "/tmp/$(basename "$f").svg"
+          done
+
       # NFR-718 regression guard: trusting every proxy header lets clients bypass the rate limit.
       - name: Backend does not trust spoofable proxy headers
         run: |

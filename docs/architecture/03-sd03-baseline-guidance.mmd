@@ -1,0 +1,48 @@
+sequenceDiagram
+  autonumber
+  actor BusinessOwner
+  participant ReactSPA
+  participant AnalysisController
+  participant BaselineAnalyzer
+  participant RecordRepository
+  participant GuidanceEngine
+  participant LLMService
+  BusinessOwner->>ReactSPA: Open the Analysis page
+  ReactSPA->>AnalysisController: GET /api/v1/analysis?asOf=today
+  AnalysisController->>BaselineAnalyzer: computeBaselines(ownerId, asOf)
+  BaselineAnalyzer->>RecordRepository: getConfirmedRecords(ownerId, asOf - 27 days, asOf)
+  RecordRepository-->>BaselineAnalyzer: StructuredSalesRecord list (CONFIRMED parents only)
+  BaselineAnalyzer->>BaselineAnalyzer: buildDailyMatrix(records) logged days x items, gaps = 0
+  alt Fewer than 7 logged days
+    BaselineAnalyzer-->>AnalysisController: AnalysisResult (INSUFFICIENT_HISTORY, no estimates)
+    AnalysisController-->>ReactSPA: 200 OK AnalysisResult
+    ReactSPA-->>BusinessOwner: "Log at least 7 days of sales to see estimates (N of 7 so far)"
+  else 7 or more logged days
+    BaselineAnalyzer->>BaselineAnalyzer: averageOf(last 7 logged days), trend, suggestedQty
+    BaselineAnalyzer->>RecordRepository: replaceBaselines(ownerId, asOf, estimates)
+    BaselineAnalyzer-->>AnalysisController: AnalysisResult (READY, estimates)
+    AnalysisController-->>ReactSPA: 200 OK AnalysisResult
+    ReactSPA-->>BusinessOwner: Average per logged day, trend, suggested stock and stock-check notice
+    BusinessOwner->>ReactSPA: Tap "Get restocking advice"
+    ReactSPA->>AnalysisController: POST /api/v1/guidance (asOf)
+    AnalysisController->>BaselineAnalyzer: computeBaselines(ownerId, asOf)
+    BaselineAnalyzer-->>AnalysisController: AnalysisResult (READY, same estimates)
+    AnalysisController->>GuidanceEngine: generateGuidance(estimates)
+    GuidanceEngine->>GuidanceEngine: buildPrompt(top 20 items by average)
+    GuidanceEngine->>LLMService: generateJson(prompt, schema, timeout=15)
+    alt Response within 15 s
+      LLMService-->>GuidanceEngine: JSON text
+      GuidanceEngine->>GuidanceEngine: checkGrounding(raw, estimates) rules 1 to 7
+      alt All rules pass
+        GuidanceEngine-->>AnalysisController: GuidanceResult (AI_WORDED)
+      else Any rule fails
+        GuidanceEngine->>GuidanceEngine: fallbackTemplate(estimates)
+        GuidanceEngine-->>AnalysisController: GuidanceResult (TEMPLATE, failedRule)
+      end
+    else Timeout or provider error, no retry
+      GuidanceEngine->>GuidanceEngine: fallbackTemplate(estimates)
+      GuidanceEngine-->>AnalysisController: GuidanceResult (TEMPLATE)
+    end
+    AnalysisController-->>ReactSPA: 200 OK GuidanceResult
+    ReactSPA-->>BusinessOwner: Advice per item, label "Standard advice" when TEMPLATE, stock-check notice
+  end

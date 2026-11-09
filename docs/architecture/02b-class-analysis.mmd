@@ -1,0 +1,124 @@
+classDiagram
+  direction TB
+  class AnalysisController {
+    -analyzer: BaselineAnalyzer
+    -guidance: GuidanceEngine
+    +getAnalysis(ownerId: UUID, asOf: date) AnalysisResult
+    +requestGuidance(ownerId: UUID, asOf: date) GuidanceResult
+  }
+  class BaselineAnalyzer {
+    -repository: RecordRepository
+    +historyDays: int = 28
+    +windowDays: int = 7
+    +minLoggedDays: int = 7
+    +coverDays: int = 7
+    +trendThreshold: float = 0.10
+    +computeBaselines(ownerId: UUID, asOf: date) AnalysisResult
+    -buildDailyMatrix(records: list~StructuredSalesRecord~) DataFrame
+    -averageOf(matrix: DataFrame, days: int, offset: int) Series
+    -trend(recentAvg: Decimal, priorAvg: Optional~Decimal~) TrendDirection
+    -suggestedQty(avg: Decimal) int
+  }
+  class GuidanceEngine {
+    -llm: LLMService
+    +timeoutSeconds: int = 15
+    +maxItems: int = 20
+    +generateGuidance(estimates: list~BaselineEstimate~) GuidanceResult
+    -buildPrompt(estimates: list~BaselineEstimate~) str
+    -checkGrounding(raw: str, estimates: list~BaselineEstimate~) GroundingOutcome
+    -fallbackTemplate(estimates: list~BaselineEstimate~) list~GuidanceItem~
+  }
+  class LLMService {
+    <<interface>>
+    +generateJson(prompt: str, schema: dict, timeout: int) str
+  }
+  class ClaudeLLMService {
+
+    -client: Anthropic
+    -modelName: str
+    +generateJson(prompt: str, schema: dict, timeout: int) str
+  }
+  class MockLLMService {
+    -cannedText: str
+    -failMode: Optional~str~
+    +generateJson(prompt: str, schema: dict, timeout: int) str
+  }
+  class RecordRepository {
+    +getConfirmedRecords(ownerId: UUID, start: date, end: date) list~StructuredSalesRecord~
+    +replaceBaselines(ownerId: UUID, asOfDate: date, estimates: list~BaselineEstimate~) None
+    +deleteBaselines(ownerId: UUID) None
+  }
+  class StructuredSalesRecord {
+    +itemName: str
+    +itemKey: str
+    +quantity: Decimal
+    +unitPrice: Decimal
+    +saleDate: date
+  }
+  class AnalysisResult {
+    +asOf: date
+    +loggedDays: int
+    +requiredDays: int = 7
+    +status: AnalysisStatus
+    +estimates: list~BaselineEstimate~
+  }
+  class BaselineEstimate {
+    +id: UUID
+    +ownerId: UUID
+    +asOfDate: date
+    +itemKey: str
+    +itemName: str
+    +windowDays: int
+    +loggedDays: int
+    +averageDailyQuantity: Decimal
+    +priorAverageDailyQuantity: Optional~Decimal~
+    +trend: TrendDirection
+    +coverDays: int
+    +suggestedRestockQty: int
+    +computedAt: datetime
+  }
+  class GuidanceResult {
+    +items: list~GuidanceItem~
+    +source: GuidanceSource
+    +groundingPassed: bool
+    +failedRule: Optional~int~
+    +stockNotice: str
+  }
+  class GuidanceItem {
+    +itemName: str
+    +suggestedQty: int
+    +message: str
+  }
+  class TrendDirection {
+    <<enumeration>>
+    UP
+    DOWN
+    STABLE
+    INSUFFICIENT_DATA
+  }
+  class AnalysisStatus {
+    <<enumeration>>
+    READY
+    INSUFFICIENT_HISTORY
+  }
+  class GuidanceSource {
+    <<enumeration>>
+    AI_WORDED
+    TEMPLATE
+  }
+  AnalysisController --> BaselineAnalyzer : keeps
+  AnalysisController --> GuidanceEngine : keeps
+  BaselineAnalyzer --> RecordRepository : keeps
+  BaselineAnalyzer ..> StructuredSalesRecord : reads
+  BaselineAnalyzer ..> AnalysisResult : creates
+  AnalysisResult *-- "0..*" BaselineEstimate : owns
+  GuidanceEngine --> LLMService : keeps
+  GuidanceEngine ..> BaselineEstimate : reads
+
+  GuidanceEngine ..> GuidanceResult : creates
+  GuidanceResult *-- "0..20" GuidanceItem : owns
+  LLMService <|.. ClaudeLLMService : implements
+  LLMService <|.. MockLLMService : implements
+  BaselineEstimate --> TrendDirection : trend
+  AnalysisResult --> AnalysisStatus : status
+  GuidanceResult --> GuidanceSource : source

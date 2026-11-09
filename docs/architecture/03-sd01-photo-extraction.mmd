@@ -1,0 +1,39 @@
+sequenceDiagram
+  autonumber
+  actor BusinessOwner
+  participant ReactSPA
+  participant SalesCaptureController
+  participant InferenceService
+  participant ObjectStorage
+  participant RecordRepository
+  participant VisionModel
+  BusinessOwner->>ReactSPA: Choose photo of sales log and sale date
+  ReactSPA->>ReactSPA: Check type (JPEG or PNG) and size (max 10 MiB)
+  ReactSPA->>SalesCaptureController: POST /api/v1/extract (file, saleDate)
+  SalesCaptureController->>SalesCaptureController: validateInput(saleDate, file, None)
+  SalesCaptureController->>InferenceService: sanitizeImage(image)
+  InferenceService-->>SalesCaptureController: sanitized JPEG (no metadata, max 2048 px)
+  SalesCaptureController->>ObjectStorage: putObject(sanitizedImage, "image/jpeg")
+  ObjectStorage-->>SalesCaptureController: imageKey (random UUID)
+  SalesCaptureController->>RecordRepository: createSubmission(ownerId, IMAGE, saleDate, imageKey, None)
+  RecordRepository-->>SalesCaptureController: submissionId (status UPLOADED)
+  SalesCaptureController->>InferenceService: extractFromImage(submissionId, sanitizedImage)
+  InferenceService->>RecordRepository: updateStatus(submissionId, CLASSIFYING)
+  InferenceService->>VisionModel: extractFromImage(image, prompt, timeout=30)
+  Note over VisionModel: Implemented by ClaudeVisionModel over HTTPS
+  VisionModel-->>InferenceService: ExtractionResult (lines and confidences)
+  InferenceService->>InferenceService: maskContacts(result)
+  InferenceService->>InferenceService: applyConfidenceBands(submissionId, result)
+  InferenceService->>RecordRepository: saveDraft(draft) sets NEEDS_VERIFICATION
+  Note right of RecordRepository: Every readable draft with 1 or more lines
+  InferenceService-->>SalesCaptureController: SalesDraft
+  SalesCaptureController-->>ReactSPA: 200 OK ExtractResponse (draft, imageUrl)
+  ReactSPA-->>BusinessOwner: Draft with "Please verify" highlights and blank LOW fields
+  BusinessOwner->>ReactSPA: Check highlighted fields, fill blanks, press Confirm
+  ReactSPA->>SalesCaptureController: POST /api/v1/confirm (submissionId, lines)
+  SalesCaptureController->>SalesCaptureController: validateLines(lines)
+  SalesCaptureController->>RecordRepository: confirmSubmission(ownerId, submissionId, lines)
+  RecordRepository->>RecordRepository: Lock row, insert SALES_RECORDS, set CONFIRMED, clear draftPayload, commit
+  RecordRepository-->>SalesCaptureController: ConfirmOutcome (recordIds, created=true)
+  SalesCaptureController-->>ReactSPA: 201 Created (recordIds)
+  ReactSPA-->>BusinessOwner: "Sales saved"

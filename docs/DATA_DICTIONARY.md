@@ -1,7 +1,7 @@
 # Bodega data dictionary
 
 This dictionary describes the PostgreSQL schema after migrations `001_data_state.sql` through
-`005_final_data_design.sql`. It was taken from `information_schema` on a freshly migrated
+`006_sales_records_final_shape.sql`. It was taken from `information_schema` on a freshly migrated
 database. It follows the final Milestone 3 ERD (Diagram 5) and sections 7.1–7.4. Where the
 physical design differs from the ERD, the difference is listed in section 6.
 
@@ -39,24 +39,27 @@ Deleting an owner cascades to its submissions, sales records and baseline snapsh
 - Indexes: `(owner_id, status, sale_date)`, `(status, updated_at)` for the stale sweep,
   `(created_at)` for the purge.
 
-## 3. sales_records — confirmed rows only
+## 3. sales_records — confirmed rows only (final ERD shape since 006)
 
 | Column | Type | Null | Rules |
 |---|---|---|---|
 | id | uuid | no | Primary key; returned as `recordId`. |
-| submission_id | uuid | no | FK `(submission_id, sale_date)` → submissions, `ON DELETE CASCADE`. |
-| line_number | integer | no | 0–99, unique per submission. Returned as `lineNo` = line_number + 1. |
+| submission_id | uuid | no | FK → submissions, `ON DELETE CASCADE`. |
+| line_no | integer | no | 1–100, unique per submission (`lineNo`). |
 | item_name | text | no | 1–100 characters after trimming, at least one non-space character. |
+| item_key | text | no | Generated: `lower(btrim(item_name))`, indexed (M3 7.2 index on itemKey). |
 | quantity | numeric | no | Greater than 0, at most 99,999.99, at most 2 decimal places (FR-202 as clarified in M3 section 3). |
 | unit_price | numeric | no | At least 0, at most 9,999,999.99, at most 2 decimal places. |
-| sale_date | date | no | Equal to the parent's date; the composite FK enforces this. |
 | source | text | no | `AI_EXTRACTED` (an AI row, even if the owner corrected it) or `MANUAL`. |
 
-- Rows are immutable: an `UPDATE` trigger rejects every edit.
+- **No sale date on the row** (M3 7.1). Every read takes it from the parent submission.
+  Migration 006 dropped the old copy. The composite FK it replaced had always forced it to equal
+  the parent's date, so no information was lost.
+- Rows are immutable: an `UPDATE` trigger rejects every edit. 006 renumbered `line_no` under a
+  temporary trigger disable, in order, with no value changes.
 - A CONFIRMED submission has 1–100 rows; every other status has none. Deferred constraint
   triggers check this at commit.
 - `lineTotal = quantity × unit_price` is computed in the API and never stored.
-- Index on `(lower(btrim(item_name)), sale_date)` for item matching (trimmed, case-insensitive).
 - The 005 limits are `NOT VALID`: PostgreSQL enforces them on every new or updated row, while
   rows written before 005 stay readable and unchanged.
 
@@ -115,8 +118,8 @@ outcome already recorded, because the final write is guarded by `expected_status
 
 | ERD (M3 7.1–7.2) | Physical design | Reason |
 |---|---|---|
-| `saleDate` not repeated on SALES_RECORDS | Kept, tied to the parent by the composite FK `(submission_id, sale_date)` | The FK already guarantees the two can never disagree. Dropping the column would rewrite every immutable row and every teammate's query, for no integrity gain. |
-| `itemKey` column on SALES_RECORDS | Functional index on `lower(btrim(item_name))` | Same lookup without rewriting immutable rows. Analysis normalizes in Python with `str.strip().casefold()`. |
-| `lineNo` 1–100 | `line_number` 0–99, returned as `lineNo` = n + 1 | Keeps migrations 001–004 unchanged. The API exposes the M3 numbering. |
-| SQLAlchemy models and Alembic migrations | psycopg and ordered SQL migrations with a ledger and an advisory lock | Already in place before Milestone 4. The effect is the same: forward-only, run at startup before `/health` answers. |
+| SQLAlchemy models and Alembic migrations | psycopg and ordered SQL migrations with a ledger and an advisory lock | Already in place before Milestone 4. The effect is the same: forward-only, run at startup before `/health` answers. Needs team sign-off (D-18). |
 | `CHECK (inputType = 'IMAGE') = (imageKey IS NOT NULL)` | Enforced in code (as M3 7.2 allows) | The purge nulls `image_key` on confirmed image submissions. |
+
+Since migration 006, the earlier differences (a repeated `sale_date`, 0-based line numbers, and no
+`itemKey` column) no longer apply.

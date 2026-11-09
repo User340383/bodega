@@ -1,0 +1,15 @@
+flowchart LR
+  USER["Business Owner<br/>(phone or desktop browser)"]
+  subgraph SYSTEM["AI Forecasting and Organizational Tool"]
+    FRONTEND["React SPA container<br/>React 18 + Vite + Tailwind CSS<br/>served by nginx"]
+    BACKEND["FastAPI backend container<br/>Python 3.12, pandas, Pillow<br/>validation, privacy, AI calls,<br/>analysis, persistence"]
+    DATABASE[("PostgreSQL 16<br/>owners, submissions,<br/>sales records, baselines")]
+  end
+  STORAGE[("Private object storage<br/>Cloudflare R2 bucket<br/>sanitized images only")]
+  AI["Anthropic Claude API<br/>extraction + guidance wording"]
+  USER -->|"HTTPS"| FRONTEND
+  FRONTEND -->|"HTTPS / REST JSON<br/>Bearer access code"| BACKEND
+  BACKEND -->|"SQL over TLS<br/>SQLAlchemy"| DATABASE
+  BACKEND -->|"HTTPS / S3 API<br/>put, delete, signed URL"| STORAGE
+  BACKEND -->|"HTTPS / REST<br/>Messages API"| AI
+  FRONTEND -. "HTTPS GET signed URL<br/>(image preview, 300 s)" .-> STORAGE

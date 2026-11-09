@@ -27,7 +27,7 @@ Nothing here has been merged to `main` or pushed. Branches kept unchanged for co
 | D-08 | **`GET /sales` returns `{start, end, records}`** with M3's record fields (`recordId`, `lineNo`, `lineTotal`, …), not a bare array. | Keeps the response extensible, and the client keeps reading `records`. The range rules are M3's (28-day default, ≤ 366 days). | Gabriel, Luis |
 | D-09 | **Analysis status keeps `NO_DATA` and `ESTIMATE_ONLY`** in addition to M3's `READY`/`INSUFFICIENT_HISTORY`. | A superset: FR-602 needs a distinct no-data state, and 7–13 dates give estimates without a trend (FR-405). | Diushen |
 | D-10 | **Snapshots are written, never read back.** Every analysis or guidance run replaces that date's `BASELINE_ESTIMATES` rows (SD-03 saveBaselines). Responses are always recomputed. | M3 section 10: "Guidance recomputes baselines"; a stale snapshot can never be shown. | Diushen, Gabriel |
-| D-11 | **`sale_date` stays on SALES_RECORDS**, tied to the parent by the composite FK; `line_number` 0–99 is exposed as `lineNo` 1–100. | Same integrity as the ERD without rewriting immutable rows or teammates' queries (DATA_DICTIONARY §7). | Gabriel |
+| D-11 | **Superseded by migration 006.** SALES_RECORDS now follows the M3 7.1 ERD exactly: no per-row `sale_date` (read from the parent), `line_no` 1–100, and a generated, indexed `item_key`. | The final M3 text is explicit ("saleDate is not repeated on SALES_RECORDS"). Nothing is lost: the old composite FK had guaranteed the dates were equal. The upgrade test proves IDs, values, order and dates survive. | Gabriel, Diushen (queries join the parent) |
 | D-12 | **Rate limit keys on the right-most trusted `X-Forwarded-For` hop** (`TRUSTED_PROXY_HOPS`, 1 on Render), and uvicorn no longer trusts proxy headers. | `--forwarded-allow-ips='*'` let any client bypass NFR-718 by rotating the left-most entry. Assumption to verify on first deploy: Render appends exactly one hop. | Luis |
 | D-13 | **Retention service** runs at startup and every 6 hours. Images are deleted through an outbox, after commit. | M3 7.4; a storage outage can never block or roll back a database delete. Retention is 30 days per M3, not the SRS's 24 hours (`docs/privacy.md`). | Gabriel, José |
 | D-14 | **Text containing markup or control characters is rejected (400).** | NFR-714 requires script-injection text to be rejected. Sales logs never need tags; a lone `<` or `&` is still accepted. | José |
@@ -36,8 +36,17 @@ Nothing here has been merged to `main` or pushed. Branches kept unchanged for co
 | D-17 | **Plain CSS stays; Tailwind is not adopted.** | M3 4.1/4.3 name Tailwind, but NFR-731–734 are met with the existing mobile-first CSS (browser-checked). Converting would rewrite every screen for no functional change. **Needs team sign-off.** | Luis |
 | D-18 | **psycopg + SQL migrations stay**, not SQLAlchemy + Alembic, and the module layout is flat (`app/*.py`), not `app/api`, `app/capture`, … | Already in place before Milestone 4; same behaviour. **Needs team sign-off** to record as deviations. | All |
 
+| D-19 | **`render.yaml` ships with `AI_PROVIDER` empty.** Extraction falls back to manual entry and guidance to Standard advice until the team enables `claude`. | NFR-716: no sales data may reach a provider whose terms have not been checked, and nobody has recorded them yet (`privacy.md` §3). | Luis, José, Diushen |
+| D-20 | **Phone masking boundaries are refined.** The M3 9.5 alternatives are unchanged, but `.`/`,` block a match only next to a digit. | The M3 boundaries let a number before a comma or full stop through unmasked, including the SRS AC-19 example itself. Decimals and thousands are still protected (tested). | José |
+| D-21 | **SRS literal texts are kept where M3 did not replace them:** "Image could not be read" (FR-210), "AI reading is temporarily unavailable" (FR-211), "Could not read — enter value" (FR-209, em dash). Each is followed by an action. | The SRS fixes these words; NFR-731 adds the action, word and grade limits. | José, Gabriel |
+| D-22 | **Delete-all is added** (`POST /api/v1/data/delete-all`, typed DELETE, "N records deleted") next to M3's per-submission delete. | SRS FR-304, AC-21, UC6 and NFR-722 all require deleting all stored data; M3 added per-submission delete but did not remove this. | Gabriel |
+| D-23 | **Readability is enforced in code:** every owner message ≤ 30 words and grade ≤ 8 (tested); AI guidance over 150 words or above grade 8 is withheld. | NFR-731, NFR-734, using the SRS 7.3 verification method. Template advice for 6 or more items exceeds 150 words in total, which conflicts with the fixed M3 template (see "Decisions that need the team"). | Diushen |
+| D-24 | **Mermaid sources committed:** `docs/architecture/*.mmd` (M3 Appendix A) and `docs/requirements/SRS.md` (M2 §6), with a CI render check. | M1, M2 §6 and M3 Appendix A each say the sources live in the repository; they did not. | All |
+
 ## Decisions that need the team
 
-D-07, D-17 and D-18 are deviations from the wording of Milestone 3. Each is justified above, but
+D-07, D-17 and D-18 are deviations from the wording of Milestone 3. NFR-734 (≤ 150 words in
+total) cannot hold for the fixed M3 template when there are 6 or more eligible items (about 28
+words per item). Either the SRS limit becomes per item, or the template becomes shorter. Each is justified above, but
 only the team can accept it. The SRS also needs the Milestone 3 changes applied to its text:
 FR-212 (pattern), FR-215/NFR-715 (30 days) and FR-304 (per-submission delete).

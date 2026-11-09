@@ -1,0 +1,25 @@
+stateDiagram-v2
+  direction TB
+  state "UPLOADED" as U
+  state "CLASSIFYING" as C
+  state "CONFIRMED" as F
+  state "Open submission (not in sales history)" as OPEN {
+    state "NEEDS_VERIFICATION" as V
+    state "AI_UNAVAILABLE" as A
+    state "REJECTED" as R
+  }
+
+  [*] --> U : Valid photo or text / create submission
+  [*] --> F : Standalone manual entry [valid lines]
+  U --> C : Extraction starts
+  C --> C : Retryable failure [attempt 1] / retry once
+  C --> V : Readable result with 1+ lines / save draft
+  C --> R : Overall confidence below 0.40, or no lines
+  C --> A : Attempt 2 fails, or non-retryable error
+  U --> A : Stale over 120 s
+  C --> A : Stale over 120 s
+  OPEN --> OPEN : Confirm fails [invalid lines or DB error] / rollback, status unchanged
+  OPEN --> F : Confirm [valid lines] / insert rows + set CONFIRMED in one transaction
+  F --> F : Repeat confirm / return existing record IDs
+  OPEN --> [*] : Owner discards, or 30-day purge
+  F --> [*] : Owner deletes submission
