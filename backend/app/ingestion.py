@@ -34,10 +34,11 @@ MAX_UNIT_PRICE = Decimal("9999999.99")
 CENT = Decimal("0.01")
 
 MESSAGES = {
-    "UNREADABLE_IMAGE": "We could not read this photo. Use good light, lay the page flat, and fit the whole page in the frame.",
+    # SRS FR-210 and FR-211 fix these opening words; the second sentence is the action (NFR-731).
+    "UNREADABLE_IMAGE": "Image could not be read. Retake it with good light, the page flat and the whole page in the frame.",
     "UNREADABLE_TEXT": "We could not read sales lines in this text. You can type the sales below.",
     "NO_LINES": "No sales lines found.",
-    "AI_UNAVAILABLE": "We could not read this right now. You can type the sales below.",
+    "AI_UNAVAILABLE": "AI reading is temporarily unavailable. You can type the sales below.",
     "MOCK_IMAGE": "Demo mode: the mock AI cannot read photos, so these sample rows are not from your page. Edit or remove them.",
 }
 

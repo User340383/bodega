@@ -20,7 +20,7 @@ OPEN_STATES = ('NEEDS_VERIFICATION', 'AI_UNAVAILABLE', 'REJECTED')
 PROCESSING_STATES = ('UPLOADED', 'CLASSIFYING')
 STALE_SECONDS = 120
 RETENTION_DAYS = 30
-STALE_MESSAGE = "We could not read this right now. You can type the sales below."
+STALE_MESSAGE = "AI reading is temporarily unavailable. You can type the sales below."
 
 
 def owner_id():
@@ -126,9 +126,10 @@ def update_status(submission_id, status, *, draft_payload=None, expected_status=
 
 
 def _records_for(conn, submission_ids):
-    return conn.execute("""SELECT r.id, r.line_number, r.submission_id AS "submissionId", r.item_name AS "itemName",
-        r.quantity, r.unit_price AS "unitPrice", r.sale_date AS "saleDate", r.source
-        FROM sales_records r WHERE r.submission_id = ANY(%s) ORDER BY r.submission_id, r.line_number""",
+    return conn.execute("""SELECT r.id, r.line_no, r.submission_id AS "submissionId", r.item_name AS "itemName",
+        r.quantity, r.unit_price AS "unitPrice", s.sale_date AS "saleDate", r.source
+        FROM sales_records r JOIN submissions s ON s.id = r.submission_id
+        WHERE r.submission_id = ANY(%s) ORDER BY r.submission_id, r.line_no""",
         (list(submission_ids),)).fetchall()
 
 
@@ -168,7 +169,7 @@ def save_sales_records(request, *, today=None):
                                   (request.submissionId, owner_id())).fetchone()
         if submission is None:
             raise HTTPException(404, "Submission not found")
-        existing = conn.execute("SELECT id FROM sales_records WHERE submission_id=%s ORDER BY line_number",
+        existing = conn.execute("SELECT id FROM sales_records WHERE submission_id=%s ORDER BY line_no",
                                 (request.submissionId,)).fetchall()
         if submission['status'] == 'CONFIRMED':
             return [r['id'] for r in existing], False
@@ -197,8 +198,9 @@ def save_sales_records(request, *, today=None):
                     if band != 'HIGH' and _same_value(draft.get(field), getattr(line, field), field) and field not in line.verifiedFields:
                         raise HTTPException(400, f"Row {index + 1}: verify or edit {field}")
             record_id = uuid4()
-            conn.execute("INSERT INTO sales_records(id,submission_id,line_number,item_name,quantity,unit_price,sale_date,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                         (record_id, request.submissionId, index, line.itemName, line.quantity, line.unitPrice, submission['sale_date'], 'AI_EXTRACTED' if draft is not None else 'MANUAL'))
+            # SALES_RECORDS has no sale date of its own: it is the parent's (M3 7.1).
+            conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                         (record_id, request.submissionId, index + 1, line.itemName, line.quantity, line.unitPrice, 'AI_EXTRACTED' if draft is not None else 'MANUAL'))
             ids.append(record_id)
         conn.execute("UPDATE submissions SET status='CONFIRMED', draft_payload=NULL WHERE id=%s", (request.submissionId,))
     return ids, True
@@ -217,7 +219,7 @@ def create_manual_submission(submission_id, sale_date, lines):
                 raise HTTPException(409, "This submission ID is already in use")
             if row[1] != 'CONFIRMED':
                 raise HTTPException(409, "This submission already exists in another state")
-            ids = conn.execute("SELECT id FROM sales_records WHERE submission_id=%s ORDER BY line_number",
+            ids = conn.execute("SELECT id FROM sales_records WHERE submission_id=%s ORDER BY line_no",
                                (submission_id,)).fetchall()
             return [r[0] for r in ids], False
         _ensure_owner(conn)
@@ -226,9 +228,9 @@ def create_manual_submission(submission_id, sale_date, lines):
         ids = []
         for index, line in enumerate(lines):
             record_id = uuid4()
-            conn.execute("""INSERT INTO sales_records(id,submission_id,line_number,item_name,quantity,unit_price,sale_date,source)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,'MANUAL')""",
-                (record_id, submission_id, index, line.itemName, line.quantity, line.unitPrice, sale_date))
+            conn.execute("""INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source)
+                VALUES (%s,%s,%s,%s,%s,%s,'MANUAL')""",
+                (record_id, submission_id, index + 1, line.itemName, line.quantity, line.unitPrice))
             ids.append(record_id)
     return ids, True
 
@@ -236,7 +238,7 @@ def create_manual_submission(submission_id, sale_date, lines):
 def _public_record(row):
     """SALES_RECORDS row in the M3 4.2 GET /sales shape. lineTotal is computed, never stored."""
     return {"recordId": row["id"], "submissionId": row["submissionId"], "saleDate": row["saleDate"],
-            "lineNo": row["line_number"] + 1, "itemName": row["itemName"], "quantity": row["quantity"],
+            "lineNo": row["line_no"], "itemName": row["itemName"], "quantity": row["quantity"],
             "unitPrice": row["unitPrice"], "lineTotal": row["quantity"] * row["unitPrice"], "source": row["source"]}
 
 
@@ -245,11 +247,11 @@ def get_confirmed_records(start_date, end_date):
     then by submission and line number. Drafts never appear."""
     with connect() as conn:
         conn.row_factory = dict_row
-        rows = conn.execute("""SELECT r.id, r.line_number, r.submission_id AS "submissionId", r.item_name AS "itemName",
-            r.quantity, r.unit_price AS "unitPrice", r.sale_date AS "saleDate", r.source
+        rows = conn.execute("""SELECT r.id, r.line_no, r.submission_id AS "submissionId", r.item_name AS "itemName",
+            r.quantity, r.unit_price AS "unitPrice", s.sale_date AS "saleDate", r.source
             FROM sales_records r JOIN submissions s ON s.id=r.submission_id
-            WHERE s.owner_id=%s AND s.status='CONFIRMED' AND r.sale_date BETWEEN %s AND %s
-            ORDER BY r.sale_date DESC, s.created_at DESC, s.id, r.line_number""",
+            WHERE s.owner_id=%s AND s.status='CONFIRMED' AND s.sale_date BETWEEN %s AND %s
+            ORDER BY s.sale_date DESC, s.created_at DESC, s.id, r.line_no""",
             (owner_id(), start_date, end_date)).fetchall()
     return [_public_record(row) for row in rows]
 
@@ -261,10 +263,10 @@ def get_confirmed_sales_between(start_date, end_date):
     """
     with connect() as conn:
         conn.row_factory = dict_row
-        return conn.execute("""SELECT r.item_name AS "itemName", r.quantity, r.sale_date AS "saleDate"
+        return conn.execute("""SELECT r.item_name AS "itemName", r.quantity, s.sale_date AS "saleDate"
             FROM sales_records r JOIN submissions s ON s.id=r.submission_id
-            WHERE s.owner_id=%s AND s.status='CONFIRMED' AND r.sale_date BETWEEN %s AND %s
-            ORDER BY r.sale_date, s.created_at, s.id, r.line_number""",
+            WHERE s.owner_id=%s AND s.status='CONFIRMED' AND s.sale_date BETWEEN %s AND %s
+            ORDER BY s.sale_date, s.created_at, s.id, r.line_no""",
             (owner_id(), start_date, end_date)).fetchall()
 
 
@@ -310,6 +312,23 @@ def delete_submission(submission_id):
         conn.execute("DELETE FROM baseline_estimates WHERE owner_id=%s", (owner_id(),))
         conn.execute("DELETE FROM submissions WHERE id=%s", (submission_id,))
     return deleted
+
+
+def delete_all_owner_data():
+    """FR-304 / AC-21: every submission, sales record, stored image and snapshot of the owner.
+    Refused (nothing deleted) while a capture is still being read. Returns (records, submissions)."""
+    with connect() as conn:
+        rows = conn.execute("SELECT id, status, image_key FROM submissions WHERE owner_id=%s FOR UPDATE",
+                            (owner_id(),)).fetchall()
+        if any(status in PROCESSING_STATES for _, status, _ in rows):
+            raise HTTPException(409, "A sales log is still being read. Try again in a moment. Nothing was deleted.")
+        records = conn.execute("""SELECT count(*) FROM sales_records r JOIN submissions s ON s.id=r.submission_id
+            WHERE s.owner_id=%s""", (owner_id(),)).fetchone()[0]
+        for _, _, image_key in rows:
+            _enqueue_image_deletion(conn, image_key)
+        conn.execute("DELETE FROM baseline_estimates WHERE owner_id=%s", (owner_id(),))
+        conn.execute("DELETE FROM submissions WHERE owner_id=%s", (owner_id(),))
+    return records, len(rows)
 
 
 def purge_expired(now=None):

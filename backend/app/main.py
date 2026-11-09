@@ -420,6 +420,29 @@ def delete_submission(submission_id: UUID, _: None = Depends(require_owner_acces
     return Response(status_code=204, headers={"X-Records-Deleted": str(deleted)})
 
 
+class DeleteAllRequest(BaseModel):
+    confirmation: str
+
+
+@app.post("/api/v1/data/delete-all")
+def delete_all_data(request: DeleteAllRequest, _: None = Depends(require_owner_access),
+                    storage=Depends(get_object_storage)):
+    """FR-304 / SRS AC-21: delete every sales record and all raw input after the owner types DELETE.
+
+    Additive to M3 4.2 (which adds per-submission DELETE); any other confirmation deletes nothing.
+    """
+    if request.confirmation != "DELETE":
+        raise HTTPException(400, detail=[{"loc": ["body", "confirmation"], "type": "value_error",
+                                          "msg": "Type DELETE to confirm. Nothing was deleted."}])
+    records, submissions = repository.delete_all_owner_data()
+    try:
+        retention.process_image_deletions(storage)
+    except psycopg.Error:
+        logger.warning("image deletion deferred to the next retention sweep")
+    noun = "record" if records == 1 else "records"
+    return {"recordsDeleted": records, "submissionsDeleted": submissions, "message": f"{records} {noun} deleted"}
+
+
 @app.get("/api/v1/sales", response_model=SalesHistoryResponse)
 def sales(start: IsoDate | None = Query(default=None), end: IsoDate | None = Query(default=None),
           _: None = Depends(require_owner_access), clock: Clock = Depends(get_clock)):

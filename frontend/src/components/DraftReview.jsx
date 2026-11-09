@@ -84,7 +84,7 @@ export default function DraftReview({ draft, request, onConfirmed }) {
                     setRows(rows.map(current => current.key === row.key ? { ...current,
                       verifiedFields: event.target.checked ? [...new Set([...current.verifiedFields, field])] : current.verifiedFields.filter(value => value !== field),
                     } : current))
-                  }} />{row.bands?.[field] === 'LOW' ? 'Could not read - enter value' : 'Please verify'}</label>}
+                  }} />{row.bands?.[field] === 'LOW' ? 'Could not read — enter value' : 'Please verify'}</label>}
               </td>
             })}
             <td><button type="button" onClick={() => setRows(rows.filter(current => current.key !== row.key))}>Remove row {index + 1}</button></td>

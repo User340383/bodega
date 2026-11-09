@@ -64,7 +64,7 @@ def counts(sid):
 def test_migration_is_repeatable_and_relationships(db):
     migrate()
     with connect() as conn:
-        assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 5
+        assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 6
         assert conn.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('owners','submissions','sales_records','baseline_estimates')").fetchone()[0] == 4
     with pytest.raises(psycopg.errors.ForeignKeyViolation), connect() as conn:
         conn.execute('INSERT INTO submissions(id,owner_id,sale_date) VALUES (%s,%s,%s)', (uuid4(), uuid4(), date.today()))
@@ -155,18 +155,26 @@ def test_manual_recovery_and_state_transitions(client):
 def test_sql_constraints(db, quantity, price):
     sid = make_submission()
     with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
-        conn.execute("INSERT INTO sales_records VALUES (%s,%s,0,'Bread',%s,%s,%s,'MANUAL')", (uuid4(), sid, quantity, price, date.today()))
+        conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,1,'Bread',%s,%s,'MANUAL')", (uuid4(), sid, quantity, price))
     assert counts(sid) == ('NEEDS_VERIFICATION', 0)
 
 
 def test_parent_date_and_confirmation_integrity(db):
     sid = make_submission()
+    # M3 7.1: the record has no date column of its own, so it can never disagree with its parent.
+    with connect() as conn:
+        columns = {row[0] for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='sales_records'")}
+    assert 'sale_date' not in columns and {'line_no', 'item_key'} <= columns
     with pytest.raises(psycopg.errors.ForeignKeyViolation), connect() as conn:
-        conn.execute("INSERT INTO sales_records VALUES (%s,%s,0,'Bread',1,1,%s,'MANUAL')", (uuid4(), sid, date.today() - timedelta(days=1)))
+        conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,1,'Bread',1,1,'MANUAL')", (uuid4(), uuid4()))
     with pytest.raises(psycopg.errors.CheckViolation):
         repository.update_status(sid, 'CONFIRMED')
     with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
-        conn.execute("INSERT INTO sales_records VALUES (%s,%s,0,'Bread',1,1,%s,'MANUAL')", (uuid4(), sid, date.today()))
+        conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,1,'Bread',1,1,'MANUAL')", (uuid4(), sid))
+    for line_no in (0, 101):
+        with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
+            conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,%s,'Bread',1,1,'MANUAL')", (uuid4(), sid, line_no))
 
 
 def test_auth_and_owner_scope(client, monkeypatch):
@@ -248,7 +256,7 @@ def test_database_rejects_whitespace_only_labels(client):
     assert client.post('/api/v1/confirm', json=body(sid)).status_code == 201
     for item in ('\t', '\n', ' \r\n '):
         with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
-            conn.execute("INSERT INTO sales_records VALUES (%s,%s,1,%s,1,1,%s,'MANUAL')", (uuid4(), sid, item, date.today()))
+            conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,2,%s,1,1,'MANUAL')", (uuid4(), sid, item))
         with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
             conn.execute("INSERT INTO baseline_estimates(id,owner_id,item_name,item_key,as_of_date,window_days,logged_days,average_daily_quantity,trend,suggested_restock_qty) VALUES (%s,%s,%s,'k',%s,7,7,1,'STABLE',7)", (uuid4(), repository.owner_id(), item, date.today()))
     assert counts(sid) == ('CONFIRMED', 1)
@@ -404,7 +412,7 @@ def test_database_enforces_final_limits_for_direct_writes(db):
     sid = make_submission()
     for quantity, label in (('0.001', 'Bread'), ('100000', 'Bread'), ('1', 'x' * 101)):
         with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
-            conn.execute("INSERT INTO sales_records VALUES (%s,%s,0,%s,%s,1,%s,'MANUAL')", (uuid4(), sid, label, quantity, date.today()))
+            conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,1,%s,%s,1,'MANUAL')", (uuid4(), sid, label, quantity))
 
 
 @pytest.mark.parametrize('data,files,field', [
@@ -454,31 +462,48 @@ def test_migration_upgrade_preserves_existing_records_and_nonblank_checks(db, mo
             for name in ('001_data_state.sql', '002_nonblank_labels.sql'):
                 conn.execute((Path(__file__).resolve().parents[1] / 'migrations' / name).read_text())
                 conn.execute('INSERT INTO schema_migrations(version) VALUES (%s)', (name,))
-        from app.main import ConfirmRequest
-        sid = make_submission()
-        original_ids, _ = repository.save_sales_records(ConfirmRequest(**body(sid)))
+        # Legacy data written in the 001 shape (sale_date on each row, line numbers from 0), the
+        # way the code before 005/006 wrote it, including a 3-row submission and a baseline.
+        owner, sid, day = repository.owner_id(), uuid4(), date.today() - timedelta(days=2)
+        original_ids = [uuid4(), uuid4(), uuid4()]
         baseline_id = uuid4()
         with connect() as conn:
-            conn.execute("INSERT INTO baseline_estimates VALUES (%s,%s,'Bread',7,7,2.5,'STABLE',18,now())",
-                         (baseline_id, repository.owner_id()))
+            conn.execute('INSERT INTO owners(id) VALUES (%s)', (owner,))
+            conn.execute('INSERT INTO submissions(id, owner_id, sale_date) VALUES (%s,%s,%s)', (sid, owner, day))
+            conn.execute("UPDATE submissions SET status='CLASSIFYING' WHERE id=%s", (sid,))
+            conn.execute("UPDATE submissions SET status='NEEDS_VERIFICATION' WHERE id=%s", (sid,))
+            for line, (record_id, item, quantity) in enumerate(zip(original_ids, ('Bread', 'Milk', 'Rice (lb)'), ('3', '2', '2.25'), strict=True)):
+                conn.execute("INSERT INTO sales_records VALUES (%s,%s,%s,%s,%s,1.50,%s,'MANUAL')", (record_id, sid, line, item, quantity, day))
+            conn.execute("UPDATE submissions SET status='CONFIRMED' WHERE id=%s", (sid,))
+            conn.execute("INSERT INTO baseline_estimates VALUES (%s,%s,'Bread',7,7,2.5,'STABLE',18,now())", (baseline_id, owner))
         migrate()
         migrate()
         with connect() as conn:
-            assert conn.execute('SELECT id FROM sales_records WHERE submission_id=%s', (sid,)).fetchone()[0] == original_ids[0]
-            assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 5
-            # 005 backfills inputType and lifecycle timestamps without touching the sales row.
+            assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 6
+            # 005 backfills inputType and lifecycle timestamps without touching the sales rows.
             assert conn.execute('SELECT input_type, confirmed_at IS NOT NULL FROM submissions WHERE id=%s',
                                 (sid,)).fetchone() == ('TEXT', True)
+            # 006: same records and values, line numbers 1..n in the original order, item keys filled.
+            rows = conn.execute('SELECT id, line_no, item_name, quantity, item_key FROM sales_records '
+                                'WHERE submission_id=%s ORDER BY line_no', (sid,)).fetchall()
+            assert [(r[0], r[1], r[2], str(r[3])) for r in rows] == [
+                (original_ids[0], 1, 'Bread', '3'), (original_ids[1], 2, 'Milk', '2'), (original_ids[2], 3, 'Rice (lb)', '2.25')]
+            assert [r[4] for r in rows] == ['bread', 'milk', 'rice (lb)']
             # The legacy snapshot is kept; it has no analysis date, so it is never "latest".
             assert conn.execute('SELECT as_of_date FROM baseline_estimates WHERE id=%s', (baseline_id,)).fetchone()[0] is None
         assert repository.get_latest_baselines() == []
-        assert counts(sid) == ('CONFIRMED', 1)
+        # The dropped per-row date is recovered from the parent in every read.
+        assert {(r['recordId'], r['saleDate'], r['lineNo']) for r in repository.get_confirmed_records(day, day)} == {
+            (original_ids[0], day, 1), (original_ids[1], day, 2), (original_ids[2], day, 3)}
+        assert counts(sid) == ('CONFIRMED', 3)
+        from app.main import ConfirmRequest
         other = make_submission()
         repository.save_sales_records(ConfirmRequest(**body(other, itemName='x' * 100)))
         assert counts(other) == ('CONFIRMED', 1)
         for label in ('x' * 101, ' ', '\t\n'):
             with pytest.raises(psycopg.errors.CheckViolation), connect() as conn:
-                conn.execute("INSERT INTO sales_records VALUES (%s,%s,1,%s,1,1,%s,'MANUAL')", (uuid4(), other, label, date.today()))
+                conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) "
+                             "VALUES (%s,%s,2,%s,1,1,'MANUAL')", (uuid4(), other, label))
     finally:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))

@@ -29,14 +29,15 @@ def load_history():
             submissions.append((sid, repository.owner_id(), day))
             for line in range(min(100, count - start)):
                 item = (start + line) % ITEMS
-                rows.append((uuid4(), sid, line, f'Item {item:03d}', 1 + (offset + item) % 9, '1.25', day))
+                rows.append((uuid4(), sid, line + 1, f'Item {item:03d}', 1 + (offset + item) % 9, '1.25'))
         made += count
     with connect() as conn:
         conn.execute('INSERT INTO owners(id) VALUES (%s) ON CONFLICT DO NOTHING', (repository.owner_id(),))
         with conn.cursor() as cur:
             cur.executemany("INSERT INTO submissions(id, owner_id, sale_date, input_type, status) "
                             "VALUES (%s, %s, %s, 'MANUAL', 'CONFIRMED')", submissions)
-            cur.executemany("INSERT INTO sales_records VALUES (%s,%s,%s,%s,%s,%s,%s,'MANUAL')", rows)
+            cur.executemany("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,'MANUAL')", rows)
     return len(rows)
 
 

@@ -59,7 +59,7 @@ def test_overall_confidence_threshold(overall, status):
     draft = apply_confidence_bands(result(line(), overall=overall), "IMAGE")
     assert draft["status"] == status
     if status == "REJECTED":
-        assert draft["payload"]["lines"] == [] and "could not read this photo" in draft["payload"]["message"]
+        assert draft["payload"]["lines"] == [] and draft["payload"]["message"].startswith("Image could not be read")  # SRS FR-210
 
 
 def test_all_null_lines_are_dropped_and_no_lines_is_rejected():
@@ -301,7 +301,7 @@ def test_ai_timeouts_fall_back_to_manual_entry_and_manual_rows_confirm(client, c
     assert response.status_code == 200
     body = response.json()
     assert (body["status"], body["manualEntry"], body["lines"]) == ("AI_UNAVAILABLE", True, [])
-    assert body["message"].startswith("We could not read this right now")
+    assert body["message"].startswith("AI reading is temporarily unavailable")  # SRS FR-211, AC-17
     assert len(capture["model"].calls) == 2
 
     confirm = client.post("/api/v1/confirm", json={"submissionId": body["submissionId"], "lines": [

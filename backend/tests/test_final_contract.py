@@ -41,7 +41,8 @@ def submission_in(state, sale_date=AS_OF, **kwargs):
 def _move(sid, target, sale_date=AS_OF):
     with connect() as conn:
         if target == 'CONFIRMED':
-            conn.execute("INSERT INTO sales_records VALUES (%s,%s,0,'Bread',1,1,%s,'MANUAL')", (uuid4(), sid, sale_date))
+            conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) "
+                         "VALUES (%s,%s,1,'Bread',1,1,'MANUAL')", (uuid4(), sid))
         conn.execute("UPDATE submissions SET status=%s, draft_payload=NULL WHERE id=%s", (target, sid))
 
 
