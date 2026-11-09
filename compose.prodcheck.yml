@@ -1,0 +1,54 @@
+# Production-topology check: the Render images (nginx bundle + uvicorn with the production CMD)
+# on two origins, exactly as Render serves them (SPA calls the API cross-origin with CORS).
+# Temporary in-memory PostgreSQL; ports bound to 127.0.0.1 only. Used by scripts/prodcheck.py
+# for the locally verifiable deployment checks and the NFR-701/702/703/704/705 measurements.
+#   docker compose -f compose.prodcheck.yml up -d --build --wait
+#   docker compose -f compose.prodcheck.yml down
+name: bodega-prodcheck
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: bodega
+      POSTGRES_USER: bodega
+      POSTGRES_PASSWORD: prodcheck-only-password
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bodega -d bodega"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  api:
+    build: ./backend
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://bodega:prodcheck-only-password@db:5432/bodega
+      APP_ACCESS_CODE: prodcheck-access-code
+      OWNER_ID: 00000000-0000-4000-8000-000000000001
+      OWNER_DISPLAY_NAME: Prodcheck Owner
+      APP_TIMEZONE: America/Santo_Domingo
+      FRONTEND_URL: http://127.0.0.1:8090
+      TRUSTED_PROXY_HOPS: "0"
+      # The mock extraction provider stands in for the AI so NFR-702/705 can be timed without a key.
+      AI_PROVIDER: mock
+    ports:
+      - "127.0.0.1:8091:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  web:
+    build: ./frontend
+    environment:
+      PORT: "8080"
+      API_BASE_URL: http://127.0.0.1:8091
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      api:
+        condition: service_healthy

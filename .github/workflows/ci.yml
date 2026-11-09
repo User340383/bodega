@@ -91,7 +91,17 @@ jobs:
           for attempt in $(seq 1 20); do curl -fsS http://localhost:8080/ >/dev/null && break; sleep 1; done
           curl -fsS http://localhost:8080/capture | grep -q '<div id="root">'
           curl -fsS http://localhost:8080/config.js | grep -q "apiBaseUrl: 'https://api.example.com'"
+          curl -fsSI http://localhost:8080/capture | grep -qi "strict-transport-security"
           docker rm -f web
+
+      # NFR-712: the code delivered to the browser holds no credentials (SRS 7.3: scan the bundle too).
+      - name: Secret-scan the browser bundle
+        run: |
+          docker create --name bundle bodega-frontend:ci >/dev/null
+          docker cp bundle:/usr/share/nginx/html ./bundle
+          docker rm bundle >/dev/null
+          docker run --rm -v "$PWD/bundle:/bundle:ro" zricethezav/gitleaks:v8.21.2 dir /bundle --redact --no-banner
+          ! grep -rqE "sk-ant-|AI_API_KEY|S3_SECRET|APP_ACCESS_CODE" bundle
 
   deploy:
     name: Deploy to Render

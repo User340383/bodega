@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import SalesTrendChart from './SalesTrendChart'
 import './ResultsDashboard.css'
 
@@ -33,7 +33,9 @@ function changeText(estimate) {
   return `${sign}${estimate.changePercent}% against the previous 7 logged dates.`
 }
 
-function ItemCard({ estimate }) {
+// Memoized: requesting advice must not re-render every item card and chart (NFR-705: the progress
+// indicator appears within 1 s even with 100 items on a slow phone CPU).
+const ItemCard = memo(function ItemCard({ estimate }) {
   // Item keys can contain spaces, so they cannot serve as IDs for aria-labelledby.
   const headingId = useId()
   return <article className="item-card" aria-labelledby={headingId}>
@@ -53,7 +55,7 @@ function ItemCard({ estimate }) {
     </>}
     <SalesTrendChart itemName={estimate.itemName} series={estimate.series} />
   </article>
-}
+})
 
 function sourceLabel(result) {
   if (result.source === 'TEMPLATE') return result.sourceLabel || TEMPLATE_LABEL
