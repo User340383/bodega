@@ -1,0 +1,15 @@
+NFR-725 forced-restart trial — scripts/nfr725_restart_trial.py, run 2026-11-08 on integration/m3-completion
+Isolated Compose project bodega-restart-trial (tmpfs PostgreSQL 16); backend SIGKILLed while a
+confirmation INSERT was active (held open by a test-only trigger), then restarted.
+
+{"trial": 1, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 0, "recordsAfterRestart": 0, "reconfirm": "201 True", "recordsAfterReconfirm": 3, "restartSeconds": 5.0, "passed": true}
+{"trial": 2, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 3, "recordsAfterRestart": 3, "reconfirm": "201 True", "recordsAfterReconfirm": 6, "restartSeconds": 4.9, "passed": true}
+{"trial": 3, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 6, "recordsAfterRestart": 6, "reconfirm": "201 True", "recordsAfterReconfirm": 9, "restartSeconds": 4.9, "passed": true}
+{"trial": 4, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 9, "recordsAfterRestart": 9, "reconfirm": "201 True", "recordsAfterReconfirm": 12, "restartSeconds": 5.0, "passed": true}
+{"trial": 5, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 12, "recordsAfterRestart": 12, "reconfirm": "201 True", "recordsAfterReconfirm": 15, "restartSeconds": 5.0, "passed": true}
+{"trial": 6, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 15, "recordsAfterRestart": 15, "reconfirm": "201 True", "recordsAfterReconfirm": 18, "restartSeconds": 4.9, "passed": true}
+{"trial": 7, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 18, "recordsAfterRestart": 18, "reconfirm": "201 True", "recordsAfterReconfirm": 21, "restartSeconds": 5.0, "passed": true}
+{"trial": 8, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 21, "recordsAfterRestart": 21, "reconfirm": "201 True", "recordsAfterReconfirm": 24, "restartSeconds": 5.0, "passed": true}
+{"trial": 9, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 24, "recordsAfterRestart": 24, "reconfirm": "201 True", "recordsAfterReconfirm": 27, "restartSeconds": 4.9, "passed": true}
+{"trial": 10, "killedWhileInsertActive": true, "stateAfterRestart": "AI_UNAVAILABLE|0", "inconsistentSubmissions": 0, "recordsBefore": 27, "recordsAfterRestart": 27, "reconfirm": "201 True", "recordsAfterReconfirm": 30, "restartSeconds": 5.0, "passed": true}
+{"NFR-725": {"trials": 10, "passed": 10, "lostConfirmedRecords": 0, "result": "PASS"}}
