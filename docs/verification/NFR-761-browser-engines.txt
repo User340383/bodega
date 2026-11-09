@@ -1,6 +1,5 @@
-NFR-761 / NFR-732 cross-engine run — scripts/browser_engines.mjs in mcr.microsoft.com/playwright:v1.49.1-noble,
-against compose.prodcheck.yml (production nginx bundle + API on separate origins). Run 2026-11-09.
-Engines are Playwright's Linux builds; the two device rows are emulations, not physical phones.
+NFR-761 / NFR-732 cross-engine run — final run 2026-11-09 on 32ffbdd (Tailwind build), compose.prodcheck.yml.
+Engines are Playwright's Linux builds; the device rows are emulations, not physical phones.
 
 {
   "results": [

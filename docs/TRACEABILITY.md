@@ -87,11 +87,11 @@ All timings follow the SRS 5 rule: at least 50 trials, the 95th percentile, and 
 
 | ID | St. | Evidence / gap |
 |---|---|---|
-| NFR-701 | V | `prodcheck.py`: 50 invalid submissions over 10 concurrent sessions, production image: **p95 0.025 s** (≤ 2.0) |
-| NFR-702 | V | `browser_nfr.mjs`: 50 trials of 50-row drafts in Edge on the 4G profile: **p95 0.074 s** after the AI response (≤ 8.0). The AI was the mock, which the SRS allows ("stubbed AI response"). |
-| NFR-703 | V | `prodcheck.py`: 50 refreshes at 5,000 records over 10 concurrent sessions: **p95 1.957 s** (≤ 3.0); single-session p95 0.159 s. Risk: little headroom on a small Render CPU. |
-| NFR-704 | V | 50 dashboard opens, 5,000 records / 100 items; 10/5 Mbps, 100 ms, CPU 4×, cache off: **p95 1.269 s** (≤ 3.0; one outlier trial reached 3.027 s). Emulated network and phone, not a physical phone. |
-| NFR-705 | V | Indicators p95 0.096 s (extraction) and 0.442 s (guidance) (≤ 1.0); guidance outcome p95 0.505 s (≤ 16); 61 s / 15 s deadlines asserted |
+| NFR-701 | V | `prodcheck.py`: 50 invalid submissions over 10 concurrent sessions, production image: **p95 0.051 s** (≤ 2.0) |
+| NFR-702 | V | `browser_nfr.mjs`: 50 trials of 50-row drafts in Edge on the 4G profile: **p95 0.087 s** after the AI response (≤ 8.0). The AI was the mock, which the SRS allows ("stubbed AI response"). |
+| NFR-703 | V | `prodcheck.py`: 50 refreshes at 5,000 records over 10 concurrent sessions: **p95 2.389 s** (≤ 3.0); single-session p95 0.159 s. Analysis also writes the SD-03 snapshots on every refresh. **Risk: little headroom on a small Render CPU.** |
+| NFR-704 | V | 50 dashboard opens, 5,000 records / 100 items; 10/5 Mbps, 100 ms, CPU 4×, cache off: **p95 1.323 s** (≤ 3.0; max 1.353 s). Emulated network and phone, not a physical phone. |
+| NFR-705 | V | Indicators p95 0.068 s (extraction) and 0.598 s (guidance; one outlier at 1.208 s) (≤ 1.0); guidance outcome p95 0.659 s (≤ 16); 61 s / 15 s deadlines asserted |
 | NFR-711 | P | HSTS on API and nginx (tested). **TLS 1.2+ and the HTTP→HTTPS redirect need the deployed Render service.** |
 | NFR-712 | V | gitleaks: 0 leaks in all commits and branches, the working tree, and the built browser bundle; CI runs both |
 | NFR-713 | V | `test_grounding`, `test_llm_provider` (payload inspected) |
@@ -131,17 +131,18 @@ All timings follow the SRS 5 rule: at least 50 trials, the 95th percentile, and 
 
 ## 4. Verification run on this branch
 
-Final run on HEAD `77889fd`, 2026-11-09, in isolated Compose projects with temporary in-memory databases:
+Final run on HEAD `32ffbdd`, 2026-11-09, in isolated Compose projects with temporary in-memory databases:
 
 | Check | Result |
 |---|---|
-| Backend pytest | **599 passed, 1 skipped**. The skip is the Dockerfile guard: it passed natively and runs as a CI step. |
-| Frontend ESLint, Vitest, Vite build | Lint clean; **126 passed**; build OK |
+| Backend pytest | **608 passed, 1 skipped**, 0 failed. The skip is the Dockerfile guard: it passed natively and runs as a CI step. |
+| `alembic upgrade head` (CI step) | Pass |
+| Frontend ESLint, Vitest, Vite build | Lint clean; **127 passed**; build OK |
 | HTTP smoke test | PASS |
 | `prodcheck.py` | 13/13 checks pass |
 | Browser timings | All 5 targets pass at p95 (above) |
 | Cross-engine workflow | 5/5 configurations pass |
-| axe and layout check on the production bundle | 20/20 page × width combinations pass |
+| axe and layout check on the Tailwind production bundle | 20/20 page × width combinations pass |
 | NFR-725 restart trial | 10/10 pass |
 | ruff | 0 findings |
 | gitleaks | 0 leaks (history, branches, working tree, browser bundle) |
