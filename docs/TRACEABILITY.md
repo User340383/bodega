@@ -28,7 +28,7 @@ The original documents were read, never modified.
 | Pandas baseline trends | `BaselineAnalyzer` (pandas with exact fractions) | V |
 | AI #2 turns trends into plain-language restocking recommendations | `GuidanceEngine` and `ClaudeLLMService`, with grounding; Standard advice fallback | V\* |
 | Stack: React, FastAPI, PostgreSQL, Docker, GitHub Actions | All present, with CI | V |
-| React + **Tailwind CSS** | Plain mobile-first CSS meeting NFR-731–734 | P: deviation D-17, needs team sign-off |
+| React + **Tailwind CSS** | Tailwind 4.3.5; components styled with Tailwind utilities (D-17 resolved) | V |
 | Data-visualization dashboard | Results dashboard with SVG chart and an exact-values table | V |
 | "Full Mermaid.js files committed to the GitHub repository" | `docs/architecture/*.mmd`, `docs/requirements/SRS.md`; render-checked in CI | V |
 | Target users: informal, cash-based merchants needing low-friction guidance | Single-owner access code; plain-language messages (NFR-731 tested) | V (the NFR-733 usability test is B) |
@@ -46,8 +46,8 @@ The original documents were read, never modified.
 | Phone masking | — | "7+ digits" (FR-212) | Precise NANP pattern (decision) | M3, with a boundary fix (D-20) |
 | Delete | — | Delete *all* data (FR-304, AC-21) | Delete any submission | Both (D-22) |
 | Quantity type | — | Finite positive number | 2 decimals, ≤ 99,999.99 | M3 |
-| Styling | Tailwind | (problem space only) | Tailwind | Plain CSS (D-17, needs sign-off) |
-| NFR-734 vs the M3 template | — | ≤ 150 words in total | Fixed ~28-word template per item | Conflict for 6+ items (needs a team decision) |
+| Styling | Tailwind | (problem space only) | Tailwind | Tailwind (D-17) |
+| NFR-734 vs the M3 template | — | ≤ 150 words in total | Fixed ~28-word template per item | Both: advice covers the top items that fit 150 words (D-23) |
 | "Today" for sale dates | — | Owner's device date | Business date in `APP_TIMEZONE` | M3. The form uses the device date and the server the business date; they match for the single business. |
 
 ## 1. Functional requirements (M2 + M3 section 3: 37)
@@ -108,23 +108,23 @@ All timings follow the SRS 5 rule: at least 50 trials, the 95th percentile, and 
 | NFR-731 | V | `test_readability` and `messages.test.js`: every owner message ≤ 30 words, grade ≤ 8, with an action and no codes |
 | NFR-732 | V | Edge at 360/768/1280/1920: no overflow, text ≥ 16 px, targets ≥ 44 px, 0 axe WCAG 2.1 AA violations |
 | NFR-733 | **B** | Needs 5 first-time participants |
-| NFR-734 | P | AI wording over 150 words or above grade 8 is withheld (tested). **The fixed M3 template exceeds 150 words in total for 6 or more items** (team decision). |
+| NFR-734 | V | Displayed advice ≤ 150 words and grade ≤ 8 for any number of items: the items with the highest suggested stock that fit; AI wording over the limits is withheld. Tested in `test_readability`. |
 | NFR-751, NFR-752 | **B** | The harness is ready (`benchmarks/`). It needs an authorized key and the benchmark photos; the SRS asks for 30 photos and 20 messages, and no real sales-log photos exist in the repository or workspace. |
 | NFR-753 | P | "0 ungrounded displayed" is enforced and tested; "≥ 80% displayable" needs the real provider |
 | NFR-761 | P | Core workflow (sign-in, manual entry, capture → review → confirm, history, dashboard, delete-all) plus layout passes in **Chromium 131, Firefox 132, WebKit 18.2** and Android/iPhone emulation (`docs/verification/NFR-761-browser-engines.txt`). Edge (Chromium) on Windows runs the NFR-70x timings. **Branded Chrome/Safari/Firefox desktop releases and physical Android 10+/iOS 16+ devices were not tested.** |
 
-**16 V, 5 P, 5 B.**
+**17 V, 4 P, 5 B.**
 
 ## 3. Milestone 3 design conformance
 
 | Area | Status | Notes |
 |---|---|---|
-| REST contract (4.2) | V | Deviations D-07, D-08 and D-09 are recorded. `delete-all` is additive (D-22). |
-| Frontend (4.3) | V | Tailwind not used (D-17) |
-| Classes and interfaces (5) | V | Controllers are route modules (D-18) |
+| REST contract (4.2) | V | Amounts are JSON numbers (D-07 resolved). D-08 and D-09 are recorded supersets. `delete-all` is additive (D-22). |
+| Frontend (4.3) | V | Tailwind with `md` breakpoints (D-17 resolved) |
+| Classes and interfaces (5) | V | SQLAlchemy models and Alembic (D-18 resolved); controllers are FastAPI route modules |
 | Lifecycle (5.6) | V | 36 pairs tested |
 | Sequences SD-01–04 (6) | V | Mocked AI |
-| Data design (7) | V | ERD shape since 006; only SQLAlchemy/Alembic differ (D-18) |
+| Data design (7) | V | ERD shape since 006; models checked against the migrated schema |
 | Deployment and DevOps (8) | P | Production topology checked locally (`prodcheck`). **Not deployed; branch protection unverifiable here.** |
 | AI pipeline, privacy, grounding (9) | V\* | |
 | Appendix A sources in `docs/architecture/` | V | Recovered from the PDF and render-checked |

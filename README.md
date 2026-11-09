@@ -69,3 +69,14 @@ python scripts/nfr725_restart_trial.py   # NFR-725: 10 forced backend restarts d
 ```
 
 Results and evidence: [docs/TRACEABILITY.md](docs/TRACEABILITY.md) and `docs/verification/`.
+
+Migrations are Alembic revisions (`backend/alembic`) that apply the reviewed SQL files in
+`backend/migrations`. They run automatically at startup; to run them by hand:
+
+```sh
+docker compose exec backend alembic upgrade head
+docker compose exec backend alembic current
+```
+
+`python scripts/live_ai_check.py` checks the real Anthropic integration once an authorized
+`AI_API_KEY` is set. It makes a few billed calls with synthetic data, and none without a key.

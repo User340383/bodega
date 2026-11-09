@@ -118,8 +118,7 @@ outcome already recorded, because the final write is guarded by `expected_status
 
 | ERD (M3 7.1–7.2) | Physical design | Reason |
 |---|---|---|
-| SQLAlchemy models and Alembic migrations | psycopg and ordered SQL migrations with a ledger and an advisory lock | Already in place before Milestone 4. The effect is the same: forward-only, run at startup before `/health` answers. Needs team sign-off (D-18). |
 | `CHECK (inputType = 'IMAGE') = (imageKey IS NOT NULL)` | Enforced in code (as M3 7.2 allows) | The purge nulls `image_key` on confirmed image submissions. |
 
-Since migration 006, the earlier differences (a repeated `sale_date`, 0-based line numbers, and no
+SQLAlchemy models (`app/models.py`) and Alembic migrations (`backend/alembic`) are in place and checked against each other (D-18). Since migration 006, the earlier differences (a repeated `sale_date`, 0-based line numbers, and no
 `itemKey` column) no longer apply.
