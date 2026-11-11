@@ -57,8 +57,8 @@ def test_every_owner_message_meets_nfr_731(name):
 
 
 def test_srs_fixed_phrases_are_kept():
-    assert ingestion.MESSAGES["AI_UNAVAILABLE"].startswith("AI reading is temporarily unavailable")  # FR-211
-    assert ingestion.MESSAGES["UNREADABLE_IMAGE"].startswith("Image could not be read")             # FR-210
+    assert ingestion.MESSAGES["AI_UNAVAILABLE"].startswith("We could not read this right now")  # M3 9.4
+    assert ingestion.MESSAGES["UNREADABLE_IMAGE"].startswith("We could not read this photo")  # M3 9.4
     assert {"flat", "light", "page"} <= set(re.findall(r"[a-z]+", ingestion.MESSAGES["UNREADABLE_IMAGE"]))
 
 

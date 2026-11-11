@@ -4,7 +4,12 @@ Error body for every non-2xx response (M3 4.2):
     {"error": {"code": "VALIDATION_ERROR", "message": "plain English", "fields": {"saleDate": "..."}},
      "detail": ...}
 `detail` repeats FastAPI's original detail (string or [{loc, msg, type}]) for clients written
-before the envelope; it never contains submitted values.
+before the envelope; it never contains submitted values. The SPA reads only `error`.
+
+Validation status codes (docs/INTEGRATION_DECISIONS.md D-30): extraction and every other request
+answer 400; confirmation of sales rows (POST /confirm and POST /manual-entries, which both save
+rows under the same FR-202-FR-204 rules) answers 422. Both carry code VALIDATION_ERROR and
+field paths such as "lines.0.quantity".
 """
 import asyncio
 import json
@@ -42,6 +47,8 @@ MAX_UNIT_PRICE = Decimal("9999999.99")
 MAX_ITEM_CHARS = 100
 MAX_PAST_DAYS = 365
 MAX_HISTORY_RANGE_DAYS = 366
+DEFAULT_PAGE_SIZE = 200
+MAX_PAGE_SIZE = 500
 
 
 @asynccontextmanager
@@ -74,10 +81,13 @@ app.add_middleware(RequestLogMiddleware)
 
 
 # ---- Errors (M3 4.2 envelope, NFR-731 plain-English messages) ------------------------------
-ERROR_CODES = {400: "VALIDATION_ERROR", 401: "UNAUTHORIZED", 404: "NOT_FOUND", 409: "INVALID_STATE",
-               429: "RATE_LIMITED", 500: "DATABASE_ERROR", 503: "SERVICE_UNAVAILABLE"}
+ERROR_CODES = {400: "VALIDATION_ERROR", 401: "UNAUTHORIZED", 404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED",
+               409: "INVALID_STATE", 422: "VALIDATION_ERROR", 429: "RATE_LIMITED", 500: "DATABASE_ERROR",
+               503: "SERVICE_UNAVAILABLE"}
+CONFIRMATION_PATHS = frozenset({"/api/v1/confirm", "/api/v1/manual-entries"})
 GENERIC_MESSAGES = {
     400: "Check the highlighted fields and try again.",
+    422: "Check the highlighted rows and try again. Nothing was saved.",
     401: "Your access code was not accepted. Please sign in again.",
     404: "We could not find that. It may have been deleted. Go back and try again.",
     409: "This cannot be changed right now. Refresh and try again.",
@@ -125,16 +135,20 @@ def _fields(details):
     return fields
 
 
+def _validation_status(request):
+    return 422 if request.url.path in CONFIRMATION_PATHS else 400
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_error(request, exc):
     details = _validation_details(exc.errors())
     first = details[0]["msg"] if len(details) == 1 else None
-    return error_response(400, message=first, fields=_fields(details), detail=details)
+    return error_response(_validation_status(request), message=first, fields=_fields(details), detail=details)
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_error(request, exc):
-    status_code = 400 if exc.status_code == 422 else exc.status_code
+    status_code = exc.status_code
     detail = exc.detail
     if isinstance(detail, list):
         return error_response(status_code, code=getattr(exc, "code", None), fields=_fields(detail), detail=detail,
@@ -148,6 +162,13 @@ async def http_error(request, exc):
 async def database_error(request, exc):
     logger.error("database operation failed", extra={"errorCategory": type(exc).__name__})
     return error_response(500, detail=GENERIC_MESSAGES[500])
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request, exc):
+    """Any other failure still answers with the envelope (no stack trace or input in the body)."""
+    logger.error("unexpected error", extra={"errorCategory": type(exc).__name__})
+    return error_response(500, code="INTERNAL_ERROR", message="Something went wrong on our side. Please try again.")
 
 
 def extraction_validation_error(field, message):
@@ -292,6 +313,10 @@ class SalesRecordResponse(BaseModel):
 class SalesHistoryResponse(BaseModel):
     start: date
     end: date
+    limit: int
+    offset: int
+    total: int
+    hasMore: bool
     records: list[SalesRecordResponse]
 
 
@@ -308,12 +333,12 @@ class GuidanceRequest(BaseModel):
     asOf: IsoDate | None = None
 
 
-def _check_sale_date(sale_date, clock, field_loc):
+def _check_sale_date(sale_date, clock, field_loc, status_code=400):
     today = clock.today()
     if sale_date > today:
-        raise HTTPException(400, detail=[{"loc": field_loc, "msg": "Sale date cannot be in the future.", "type": "value_error"}])
+        raise HTTPException(status_code, detail=[{"loc": field_loc, "msg": "Sale date cannot be in the future.", "type": "value_error"}])
     if sale_date < today - timedelta(days=MAX_PAST_DAYS):
-        raise HTTPException(400, detail=[{"loc": field_loc, "msg": "Sale date cannot be more than 365 days ago.", "type": "value_error"}])
+        raise HTTPException(status_code, detail=[{"loc": field_loc, "msg": "Sale date cannot be more than 365 days ago.", "type": "value_error"}])
 
 
 # ---- Routes ----------------------------------------------------------------------------------
@@ -418,11 +443,20 @@ def confirm(request: ConfirmRequest, response: Response, _: None = Depends(requi
     return {"submissionId": request.submissionId, "recordIds": ids, "created": created}
 
 
+def _delete_queued_images(storage, limit=100):
+    """Best effort after a commit: anything not deleted now stays queued for the next sweep."""
+    try:
+        return retention.process_image_deletions(storage, limit=limit)
+    except psycopg.Error:
+        logger.warning("image deletion deferred to the next retention sweep")
+        return None
+
+
 @app.post("/api/v1/manual-entries", status_code=status.HTTP_201_CREATED)
 def manual_entry(request: ManualEntryRequest, response: Response, _: None = Depends(require_owner_access),
                  clock: Clock = Depends(get_clock)):
     """Standalone manual entry (FR-104, SD-04): no AI request; the submission is created CONFIRMED."""
-    _check_sale_date(request.saleDate, clock, ["body", "saleDate"])
+    _check_sale_date(request.saleDate, clock, ["body", "saleDate"], status_code=422)
     ids, created = repository.create_manual_submission(request.submissionId, request.saleDate, request.lines)
     response.status_code = 201 if created else 200
     return {"submissionId": request.submissionId, "recordIds": ids, "created": created}
@@ -446,10 +480,7 @@ def delete_submission(submission_id: UUID, _: None = Depends(require_owner_acces
     """Discard an open draft or delete a confirmed submission (FR-216, FR-304, M3 7.4)."""
     deleted = repository.delete_submission(submission_id)
     # The image was queued in the same transaction; remove it now, or on the next sweep.
-    try:
-        retention.process_image_deletions(storage, limit=10)
-    except psycopg.Error:
-        logger.warning("image deletion deferred to the next retention sweep")
+    _delete_queued_images(storage, limit=10)
     return Response(status_code=204, headers={"X-Records-Deleted": str(deleted)})
 
 
@@ -467,26 +498,36 @@ def delete_all_data(request: DeleteAllRequest, _: None = Depends(require_owner_a
     if request.confirmation != "DELETE":
         raise HTTPException(400, detail=[{"loc": ["body", "confirmation"], "type": "value_error",
                                           "msg": "Type DELETE to confirm. Nothing was deleted."}])
+    # One transaction: if PostgreSQL fails, nothing is deleted and storage is not touched.
     records, submissions = repository.delete_all_owner_data()
-    try:
-        retention.process_image_deletions(storage)
-    except psycopg.Error:
-        logger.warning("image deletion deferred to the next retention sweep")
+    # After the commit: a photo that cannot be removed now stays queued and is retried by every
+    # retention sweep until it is gone. The records are already deleted either way.
+    _delete_queued_images(storage, limit=1000)
+    pending = repository.queued_image_count()
     noun = "record" if records == 1 else "records"
-    return {"recordsDeleted": records, "submissionsDeleted": submissions, "message": f"{records} {noun} deleted"}
+    message = f"{records} {noun} deleted"
+    if pending:
+        message += ". Some saved photos will be removed shortly"
+    return {"recordsDeleted": records, "submissionsDeleted": submissions, "imagesPendingDeletion": pending,
+            "message": message}
 
 
 @app.get("/api/v1/sales", response_model=SalesHistoryResponse)
 def sales(start: IsoDate | None = Query(default=None), end: IsoDate | None = Query(default=None),
+          limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE), offset: int = Query(default=0, ge=0),
           _: None = Depends(require_owner_access), clock: Clock = Depends(get_clock)):
-    """Confirmed sales by date (FR-303). Default: the last 28 days; range at most 366 days."""
+    """Confirmed sales by date (FR-303, M3 4.2). Defaults: end = today, start = end - 27 days (the
+    last 28 days); at most 366 days; start on or before end; both are YYYY-MM-DD. Pages of `limit`
+    records (default 200), newest date first; `total` and `hasMore` describe the whole range."""
     end = end or clock.today()
     start = start or end - timedelta(days=27)
     if start > end:
         raise HTTPException(400, detail=[{"loc": ["query", "start"], "msg": "Start date must be on or before the end date.", "type": "value_error"}])
     if (end - start).days + 1 > MAX_HISTORY_RANGE_DAYS:
         raise HTTPException(400, detail=[{"loc": ["query", "start"], "msg": "Choose a date range of at most 366 days.", "type": "value_error"}])
-    return NumberJSONResponse({"start": start, "end": end, "records": repository.get_confirmed_records(start, end)})
+    records, total = repository.get_confirmed_records(start, end, limit=limit, offset=offset)
+    return NumberJSONResponse({"start": start, "end": end, "limit": limit, "offset": offset, "total": total,
+                               "hasMore": offset + len(records) < total, "records": records})
 
 
 @app.get("/api/v1/analysis", response_model=AnalysisResponse)
@@ -521,7 +562,9 @@ def _openapi_with_400_validation():
         return app.openapi_schema
     from fastapi.openapi.utils import get_openapi
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-    for path in schema.get("paths", {}).values():
+    for route, path in schema.get("paths", {}).items():
+        if route in CONFIRMATION_PATHS:
+            continue  # Confirmation validation really is 422 (D-30).
         for operation in path.values():
             responses = operation.get("responses", {})
             if "422" in responses:

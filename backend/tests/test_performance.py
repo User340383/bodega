@@ -60,7 +60,7 @@ def test_ledger_and_guidance_stay_responsive_at_5000_records(client):
     load_history()
     started = time.monotonic()
     ledger = client.get('/api/v1/sales')
-    assert ledger.status_code == 200 and len(ledger.json()['records']) == RECORDS
+    assert ledger.status_code == 200 and ledger.json()['total'] == RECORDS and len(ledger.json()['records']) == 200
     started_guidance = time.monotonic()
     guidance = client.post('/api/v1/guidance', json={})  # No provider configured: template wording.
     body = guidance.json()

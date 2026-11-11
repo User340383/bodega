@@ -7,7 +7,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const INPUT_LABELS = { IMAGE: 'Photo', TEXT: 'Text', MANUAL: 'Manual' }
 
 // Pending drafts (FR-216, M3 4.3 /drafts): every open submission from GET /api/v1/submissions,
-// with Open and Discard. Discarding deletes the draft and its saved photo or text.
+// loaded from PostgreSQL so drafts reopen across sessions, with Open and Discard. Discarding
+// deletes the draft and its saved photo or text.
 export default function DraftsPage() {
   const { request } = useAuth()
   const navigate = useNavigate()

@@ -143,3 +143,11 @@ A repository admin applies these under **Settings → Branches**, or with `gh ap
 - **Pending drafts** now read `GET /api/v1/submissions`, with Discard.
 - **Browser check (Edge, 360–1920 px):** no overflow, text ≥ 16 px, targets ≥ 44 px, 0 axe WCAG 2.1 AA violations.
 - **Still manual:** Render provisioning, deploy hook secrets, the database plan and branch protection.
+
+## Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Your deliverables are complete locally:** one-command Compose stack, `.env.example`, `render.yaml`, CI on every pull request, the `main` ruleset (1 approving review, 3 required checks) and the application shell. The live Render deployment still needs the account.
+- **Changes in your files, for your review:** `backend/Dockerfile` copies `seeds/` (SQL seed script, D-34). `ci.yml` and `compose.test.yml` gain an HTTP Smoke Test job with MinIO and a second backend using the mock provider. `main.py` adds the envelope for unexpected errors (`INTERNAL_ERROR`) and 405, `/sales` paging (D-32) and 422 for invalid confirmation rows (D-30, open). `DraftsPage.jsx` and `ReviewPage.jsx`: the review page gains "Discard this draft".
+- **Please decide:** add "Lint and Secret Scan" and "HTTP Smoke Test" to the required checks of the ruleset.

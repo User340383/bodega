@@ -107,13 +107,28 @@ const record = (overrides = {}) => ({
 const ledger = records => ({ start: '2026-09-04', end: '2026-10-01', records })
 
 describe('Confirmed sales ledger', () => {
+  it('pages through a long history with limit and offset', async () => {
+    const page = (offset, hasMore) => ({ start: '2026-04-03', end: '2026-04-30', limit: 200, offset, total: 250, hasMore,
+      records: [record({ itemName: offset ? 'Older' : 'Newer' })] })
+    const request = vi.fn(path => Promise.resolve(path.includes('offset=200') ? page(200, false) : page(0, true)))
+    const user = userEvent.setup()
+    render(<SalesHistory request={request} revision={0} />)
+    expect(await screen.findByText('Newer')).toBeInTheDocument()
+    expect(screen.getByText(/records 1–1 of 250/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Newer records' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Older records' }))
+    expect(await screen.findByText('Older')).toBeInTheDocument()
+    expect(request).toHaveBeenLastCalledWith('/api/v1/sales?limit=200&offset=200')
+    expect(screen.getByRole('button', { name: 'Older records' })).toBeDisabled()
+  })
+
   it('filters by a date range', async () => {
     const request = vi.fn().mockResolvedValue(ledger([]))
     const user = userEvent.setup()
     render(<SalesHistory request={request} revision={0} />)
     await screen.findByText(/No confirmed sales in these dates/)
     await user.type(screen.getByLabelText('From'), '2026-01-01')
-    await waitFor(() => expect(request).toHaveBeenLastCalledWith('/api/v1/sales?start=2026-01-01'))
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith('/api/v1/sales?start=2026-01-01&limit=200'))
   })
 
   it('deletes a submission only after DELETE is typed, and reports the count (FR-304)', async () => {
@@ -158,7 +173,7 @@ describe('Confirmed sales ledger', () => {
     finish({ start: '2026-04-03', end: '2026-04-30', records: [] })
     expect(await screen.findByText(/No confirmed sales in these dates/)).toBeInTheDocument()
     expect(screen.getByText('Showing 2026-04-03 to 2026-04-30.')).toBeInTheDocument()
-    expect(request).toHaveBeenCalledWith('/api/v1/sales')
+    expect(request).toHaveBeenCalledWith('/api/v1/sales?limit=200')
   })
 
   it('shows failures and refreshes successfully', async () => {

@@ -3,12 +3,15 @@ import { useEffect, useState } from 'react'
 // Amounts arrive as exact JSON numbers (M3 4.2); money is shown with 2 decimals.
 const money = value => Number(value).toFixed(2)
 const SOURCE_LABELS = { AI_EXTRACTED: 'Read by AI, checked by you', MANUAL: 'Typed by you' }
+export const PAGE_SIZE = 200  // Server default; a submission (at most 100 rows) rarely spans pages.
 
 // Gabriel: confirmed sales ledger (FR-303, M3 4.3 /history). GET /api/v1/sales returns the last
-// 28 days by default; the owner can choose any range of up to 366 days. Deleting a submission
+// 28 days by default; the owner can choose any range of up to 366 days. Pages of PAGE_SIZE records
+// use limit/offset; the server reports total and hasMore for the whole range. Deleting a submission
 // (FR-304, M3 7.4) needs the word DELETE typed into an in-page confirmation.
 export default function SalesHistory({ request, revision = 0 }) {
   const [range, setRange] = useState({ start: '', end: '' })
+  const [offset, setOffset] = useState(0)
   const [state, setState] = useState({ data: null, loading: true, error: '' })
   const [reload, setReload] = useState(0)
   const [pending, setPending] = useState(null)
@@ -21,6 +24,8 @@ export default function SalesHistory({ request, revision = 0 }) {
     const params = new URLSearchParams()
     if (range.start) params.set('start', range.start)
     if (range.end) params.set('end', range.end)
+    params.set('limit', String(PAGE_SIZE))
+    if (offset) params.set('offset', String(offset))
     const query = params.toString()
     request(`/api/v1/sales${query ? `?${query}` : ''}`).then(data => {
       if (active) setState({ data, loading: false, error: '' })
@@ -28,7 +33,7 @@ export default function SalesHistory({ request, revision = 0 }) {
       if (active) setState({ data: null, loading: false, error: error.message })
     })
     return () => { active = false }
-  }, [request, revision, range, reload])
+  }, [request, revision, range, reload, offset])
 
   function refresh() {
     setState(current => ({ ...current, loading: true, error: '' }))
@@ -37,6 +42,7 @@ export default function SalesHistory({ request, revision = 0 }) {
 
   function changeRange(field, value) {
     setState(current => ({ ...current, loading: true }))
+    setOffset(0)
     setRange(current => ({ ...current, [field]: value }))
   }
 
@@ -73,7 +79,8 @@ export default function SalesHistory({ request, revision = 0 }) {
         onChange={event => changeRange('end', event.target.value)} /></label>
       <button type="button" onClick={refresh}>Refresh history</button>
     </div>
-    {state.data && <p className="hint">Showing {state.data.start} to {state.data.end}.</p>}
+    {state.data && <p className="hint">Showing {state.data.start} to {state.data.end}
+      {state.data.total > 0 && `: records ${state.data.offset + 1}–${state.data.offset + state.data.records.length} of ${state.data.total}`}.</p>}
     {notice && <p role="status" className="status-note">{notice}</p>}
 
     {pending && <form className="confirm-delete" role="group" aria-labelledby="delete-heading" onSubmit={confirmDelete}>
@@ -100,5 +107,11 @@ export default function SalesHistory({ request, revision = 0 }) {
             aria-label={`Delete submission from ${record.saleDate} starting with ${record.itemName}`}>Delete submission</button>}</td>
         </tr>)}</tbody>
       </table></div>}
+    {state.data && (state.data.offset > 0 || state.data.hasMore) && <nav aria-label="History pages" className="link-row">
+      <button type="button" className="secondary" disabled={state.loading || offset === 0}
+        onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Newer records</button>
+      <button type="button" className="secondary" disabled={state.loading || !state.data.hasMore}
+        onClick={() => setOffset(offset + PAGE_SIZE)}>Older records</button>
+    </nav>}
   </section>
 }

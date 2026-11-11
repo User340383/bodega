@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY migrations ./migrations
+COPY seeds ./seeds
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY tests ./tests

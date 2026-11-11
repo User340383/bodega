@@ -350,3 +350,12 @@ The final Milestone 3 (October 23) supersedes parts of this report. Changes on t
 - **Unmerged branch work ported.** The substance of `cb55fce` is now in `005_final_data_design.sql`, `repository.py` and `retention.py`, rebuilt on current `main` instead of merged (D-01, D-02): manual entries, pending drafts, deletion, the date-range ledger, the 30-day purge, the image outbox, and snapshots.
 - **Your work is preserved.** The original branch and stash are kept in `backup/gabriel-data-state-cb55fce` and `backup/gabriel-stash-2026-11-08`.
 - **Current status:** `docs/DATA_DICTIONARY.md` and `docs/TRACEABILITY.md`.
+
+## 14. Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Deliverables complete locally:** the four-table schema (Alembic head `006`), transactional and idempotent `POST /confirm`, the rollback and duplicate-confirmation tests, the Draft Review table and the Sales History ledger.
+- **Withdrawn:** migration 007 and the 24-hour input deadline (D-27) and the retry transition (D-29). Retention is M3 7.4 again: `draftPayload` cleared on confirmation, input kept 30 days. A local development database that already applied the unreleased 007 must be recreated (`docker compose down -v`).
+- **Added:** `backend/seeds/synthetic_sales.sql`, the SQL seed script WorkDivision's execution steps ask for (D-34); `/sales` paging (D-32); confirmation errors carry field paths that the review table shows on the row.
+- **Open:** 422 or 400 for invalid confirmation rows (D-30).

@@ -3,8 +3,9 @@
 - Image sanitization: apply EXIF orientation, copy pixels only, re-encode as JPEG q85 with the
   long edge at most 2,048 px. All EXIF/XMP/IPTC/ICC metadata (GPS, device, capture time) is
   dropped because the output image is rebuilt from raw pixel bytes.
-- Contact masking: phone numbers and emails become "[removed]". The phone pattern is the
-  NANP-aware one from Milestone 3, so ordinary sales lines and ISO dates survive.
+- Contact masking: phone numbers and emails become "[removed]" (FR-212). The pattern is
+  Milestone 3's NANP-aware one (9.5), so ordinary sales lines, prices and ISO dates survive, with
+  two reviewed refinements (docs/INTEGRATION_DECISIONS.md D-20, D-28).
 """
 import io
 import re
@@ -22,16 +23,28 @@ PNG_MAGIC = b"\x89PNG"
 
 MASK = "[removed]"
 
-# Milestone 3, section 9.5. Applied before the email pattern.
-# The alternatives are M3's. Its boundaries were (?<![\w.,]) and (?![\w.,]), which also rejected
-# ordinary punctuation: "call 555-123-4567, thanks" or a number ending a sentence went to the AI
-# unmasked (SRS AC-19). A "." or "," now blocks a match only when a digit follows/precedes it,
-# which is what keeps decimals and thousands ("1,250.75", "1234567.89") from being masked.
+# Applied before the email pattern. Alternatives, in order:
+#   +1 809 555 1234 / +18095551234-style international numbers (M3 9.5);
+#   (809) 555-1234, (809) 555 1234, optionally with a leading "1 " (M3 9.5, spaces added);
+#   809-555-1234, 809.555.1234 and 809 555 1234 (M3 had no all-space form: the audit found
+#   "809 555 1234" sent unmasked). Spaces must be used for both gaps, so "Rice 100 250.00" or a
+#   quantity followed by a price is never read as one number;
+#   555-1234 (M3 9.5);
+#   any unbroken run of 10-15 digits (M3 9.5). Shorter runs are not masked: a unit price may be
+#   up to 9,999,999.99 (M3 5.4), so "Rice 1 1500000" must reach the model intact.
+# "555 1234" (one space) is deliberately not masked: it is indistinguishable from a quantity and
+# a price ("Rice 100 2500"), and keeping sales lines intact is part of FR-212's purpose.
+# Boundaries: M3's (?<![\w.,]) and (?![\w.,]) also rejected ordinary punctuation, so a number
+# before a comma or full stop went unmasked (D-20). A "." or "," blocks a match only when a digit
+# is on its other side, which keeps decimals and thousands ("1,250.75", "1234567.89") intact.
 PHONE_PATTERN = re.compile(
-    r"(?<!\w)(?<!\d[.,])(?:\+\d{1,3}[\s.-]?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}"
-    r"|(?:\(\d{3}\)\s?|\d{3}[.-])\d{3}[.-]\d{4}"
+    r"(?<!\w)(?<!\d[.,])(?:"
+    r"\+\d{1,3}[\s.-]?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}"
+    r"|(?:1[ .-])?\(\d{3}\)[ .-]?\d{3}[ .-]\d{4}"
+    r"|(?:1[ .-])?\d{3}(?:[.-]\d{3}[.-]|[ \t]\d{3}[ \t])\d{4}"
     r"|\d{3}-\d{4}"
-    r"|\+?\d{10,15})(?!\w)(?![.,]\d)"
+    r"|\+?\d{10,15}"
+    r")(?!\w)(?![.,]\d)"
 )
 EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 

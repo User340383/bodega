@@ -41,6 +41,30 @@ jobs:
           docker compose -f compose.test.yml run --rm backend-tests sh -c
           'export DATABASE_URL=$TEST_DATABASE_URL && alembic upgrade head && alembic current | grep -q "(head)"'
 
+  http-smoke:
+    name: HTTP Smoke Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # Real PostgreSQL and S3 (MinIO), the SPA's proxy, and two backends: one with no AI provider
+      # (manual entry during an outage) and one with the mock provider (capture -> guidance).
+      - name: Start the smoke stack
+        run: docker compose -f compose.test.yml --profile smoke up -d --build --wait backend-smoke backend-smoke-ai frontend-smoke
+
+      - name: Run the HTTP smoke test
+        run: docker compose -f compose.test.yml --profile smoke run --rm --build http-smoke
+
+      - name: Show backend logs on failure
+        if: failure()
+        run: docker compose -f compose.test.yml --profile smoke logs backend-smoke backend-smoke-ai --tail 200
+
+      - name: Stop the smoke stack
+        if: always()
+        run: docker compose -f compose.test.yml --profile smoke down -v
+
   frontend-checks:
     name: Frontend Tests, Lint and Build
     runs-on: ubuntu-latest
@@ -118,7 +142,7 @@ jobs:
 
   deploy:
     name: Deploy to Render
-    needs: [backend-tests, frontend-checks, static-checks, production-images]
+    needs: [backend-tests, http-smoke, frontend-checks, static-checks, production-images]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production

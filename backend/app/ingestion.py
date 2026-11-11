@@ -11,7 +11,7 @@ import logging
 import queue
 import threading
 import time
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from . import repository
 from .privacy import mask_text
@@ -32,13 +32,14 @@ MAX_ITEM_CHARS = 100
 MAX_QUANTITY = Decimal("99999.99")
 MAX_UNIT_PRICE = Decimal("9999999.99")
 CENT = Decimal("0.01")
+MAX_DIGITS = 30  # Longer numbers cannot be a sales value; treated as unreadable.
 
 MESSAGES = {
-    # SRS FR-210 and FR-211 fix these opening words; the second sentence is the action (NFR-731).
-    "UNREADABLE_IMAGE": "Image could not be read. Retake it with good light, the page flat and the whole page in the frame.",
+    # M3 9.4 "Owner sees" texts; each ends with the action the owner can take (NFR-731).
+    "UNREADABLE_IMAGE": "We could not read this photo. Use good light, lay the page flat, and fit the whole page in the frame.",
     "UNREADABLE_TEXT": "We could not find sales lines in this text. You can type the sales in the form below.",
     "NO_LINES": "No sales lines found. Retake the photo or type the sales below.",
-    "AI_UNAVAILABLE": "AI reading is temporarily unavailable. Type your sales in the form below. We kept your input.",
+    "AI_UNAVAILABLE": "We could not read this right now. You can type the sales below.",
     "MOCK_IMAGE": "Demo mode: the mock AI cannot read photos, so these sample rows are not from your page. Edit or remove them.",
 }
 
@@ -55,17 +56,25 @@ def _clean_name(value):
 
 
 def _clean_number(value, maximum, allow_zero):
-    """Return (value or None, adjusted). Out-of-range values are cleared; extra decimals are rounded."""
+    """Return (value or None, breaks_rule). The value is kept exactly as the model read it: nothing
+    is rounded or clamped before the owner reviews it (an audit found 1.234 shown as 1.23).
+
+    The approved rules (M3 section 3 and 7.2: quantity > 0, price >= 0, at most two
+    decimals, maximum values) are enforced at review and confirmation instead. A value that
+    breaks one stays visible, is never banded HIGH, and blocks Confirm until it is corrected.
+    """
     if value is None:
         return None, False
     number = Decimal(value)
-    if not number.is_finite() or number > maximum or number < 0 or (number == 0 and not allow_zero):
+    if not number.is_finite() or len(number.as_tuple().digits) > MAX_DIGITS:
         return None, False
-    rounded = number.quantize(CENT, rounding=ROUND_HALF_UP)
-    if rounded == 0 and not allow_zero:
-        return None, False
-    # "3.00" -> "3" (to_integral_value, not normalize, which would turn 100 into "1E+2").
-    return rounded.to_integral_value() if rounded == rounded.to_integral_value() else rounded, rounded != number
+    breaks_rule = (number > maximum or number < 0 or (number == 0 and not allow_zero)
+                   or number != number.quantize(CENT))
+    # As read, in plain digits: "1.50" stays "1.50" and "1.234" stays "1.234"; only an all-zero
+    # fraction is dropped ("3.00" -> "3"; to_integral_value, not normalize, which gives "1E+2").
+    if number == number.to_integral_value():
+        number = number.to_integral_value()
+    return number, breaks_rule
 
 
 def band_for(value, confidence):
@@ -101,9 +110,10 @@ def apply_confidence_bands(result: ExtractionResult, input_type: str) -> dict:
         for field, value in values.items():
             band = band_for(value, confidences[field])
             if band == "HIGH" and adjusted[field]:
-                band = "MEDIUM"  # We changed what the model read, so the owner must check it.
+                # A shortened name, or a number outside the approved rules: the owner must act on it.
+                band = "MEDIUM"
             line["bands"][field] = band
-            line[field] = None if band == "LOW" or value is None else str(value)
+            line[field] = None if band == "LOW" or value is None else format(value, "f") if isinstance(value, Decimal) else str(value)
         lines.append(line)
 
     if not lines:

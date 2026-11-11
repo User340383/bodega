@@ -27,21 +27,49 @@ services:
       target: dev
     command: ["sh", "-c", "npm run lint && npm test && npm run build"]
 
+  # Smoke stack (M3 8.5): real PostgreSQL and S3 (MinIO) on tmpfs, two backends on one database.
+  # backend-smoke has no AI provider (the outage path, NFR-722) and is reached through the SPA's
+  # proxy; backend-smoke-ai uses the deterministic mock provider for capture -> guidance.
+  minio-smoke:
+    profiles: [smoke]
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: smoke-minio
+      MINIO_ROOT_PASSWORD: smoke-minio-password
+    tmpfs:
+      - /data
   backend-smoke:
     profiles: [smoke]
     build: ./backend
-    environment:
+    environment: &smoke-backend
       DATABASE_URL: postgresql://bodega_test:test-only-password@postgres-test:5432/bodega_test
       APP_ACCESS_CODE: smoke-test-code
       OWNER_ID: 00000000-0000-4000-8000-000000000001
+      S3_ENDPOINT_URL: http://minio-smoke:9000
+      S3_BUCKET: smoke-images
+      S3_ACCESS_KEY_ID: smoke-minio
+      S3_SECRET_ACCESS_KEY: smoke-minio-password
     depends_on:
       postgres-test:
         condition: service_healthy
-    healthcheck:
+      minio-smoke:
+        condition: service_started
+    healthcheck: &smoke-health
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 2s
       timeout: 5s
       retries: 30
+  backend-smoke-ai:
+    profiles: [smoke]
+    build: ./backend
+    environment:
+      <<: *smoke-backend
+      AI_PROVIDER: mock
+    depends_on:
+      backend-smoke:
+        condition: service_healthy
+    healthcheck: *smoke-health
   frontend-smoke:
     profiles: [smoke]
     build:
@@ -58,6 +86,10 @@ services:
     build: ./backend
     environment:
       API_URL: http://frontend-smoke:5173
+      AI_API_URL: http://backend-smoke-ai:8000
     depends_on:
-      - frontend-smoke
+      frontend-smoke:
+        condition: service_started
+      backend-smoke-ai:
+        condition: service_healthy
     command: ["python", "tests/smoke_http.py"]

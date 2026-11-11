@@ -16,6 +16,8 @@ export default function DraftReview({ draft, request, onConfirmed }) {
   const [rows, setRows] = useState(() => reviewRows(draft))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // error.fields from a 422 (D-30), keyed like "lines.0.quantity": shown on that row and field.
+  const [serverFields, setServerFields] = useState({})
   const [result, setResult] = useState(null)
   const status = draft.status
   const editable = EDITABLE.includes(status)
@@ -27,6 +29,7 @@ export default function DraftReview({ draft, request, onConfirmed }) {
   ))
 
   function change(key, field, value) {
+    setServerFields({})
     setRows(rows.map(row => row.key === key ? {
       ...row, [field]: value, verifiedFields: [...new Set([...row.verifiedFields, field])],
     } : row))
@@ -37,6 +40,7 @@ export default function DraftReview({ draft, request, onConfirmed }) {
     if (busy || invalid || result || !editable) return
     setBusy(true)
     setError('')
+    setServerFields({})
     try {
       const response = await request('/api/v1/confirm', {
         method: 'POST',
@@ -49,7 +53,10 @@ export default function DraftReview({ draft, request, onConfirmed }) {
       })
       setResult(response)
       onConfirmed?.(response)
-    } catch (err) { setError(err.message) }
+    } catch (err) {
+      setError(err.message)
+      setServerFields(err.fields || {})
+    }
     finally { setBusy(false) }
   }
 
@@ -68,7 +75,7 @@ export default function DraftReview({ draft, request, onConfirmed }) {
           <tbody>{rows.map((row, index) => <tr key={row.key}>
             {fields.map(field => {
               const uncertain = row.extracted && row.bands?.[field] !== 'HIGH'
-              const validation = fieldError(row, field)
+              const validation = fieldError(row, field) || serverFields[`lines.${index}.${field}`] || ''
               const errorId = `row-${index}-${field}-error`
               return <td key={field} className={uncertain ? 'verify' : ''}>
                 <label>

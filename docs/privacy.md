@@ -59,6 +59,9 @@ on `mock`. In that case extraction falls back to manual entry and guidance uses 
 ## 4. Known limits
 
 - Removing metadata does not remove personal information visible in the photo itself.
+- Two reviewed refinements of that pattern: punctuation after a number no longer blocks masking
+  (D-20), and `809 555 1234`, `(809) 555 1234` and a leading `1-` are also masked (D-28). Digit
+  runs shorter than 10 are never masked, because a unit price may have 7 digits (M3 5.4).
 - The phone pattern is the precise M3 9.5 one, by team decision (M3 section 10). A number written
   only with spaces and no country code (`809 555 1234`) is not masked. The generic SRS "7+ digits"
   rule was rejected because it erased ordinary sales lines.

@@ -102,3 +102,10 @@ Business date note, observed while testing: in the evening in Santo Domingo the 
 - **RetentionService** is in `app/retention.py` (30-day purge, stale sweep, image outbox).
 - **`docs/privacy.md` exists.** The NFR-716 provider terms are still unrecorded and need the account owner.
 - **Benchmark harness:** `backend/benchmarks/extraction_benchmark.py` (NFR-751/752). No results yet: it needs 20 real pages and an authorized key.
+
+## 9. Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Your deliverables are complete locally** with the mock model: `/extract`, validation (10 MiB), EXIF stripping, masking, 30 s timeout with one retry, the security tests and the capture UI. Real Claude extraction still needs an authorized `AI_API_KEY`.
+- **Changes in your files, for your review:** extraction no longer rounds or clamps numbers (D-31: 1.234 was shown as 1.23). The owner-facing fallback texts are now M3 9.4's (D-33). Masking keeps M3's 10-digit rule and adds `809 555 1234`, `(809) 555 1234` and a leading `1-` (D-28). A separate retry endpoint that had been added was removed again (D-29): M3 has no such transition, and the in-request retry is unchanged.

@@ -21,8 +21,10 @@ PROCESSING_STATES = ('UPLOADED', 'CLASSIFYING')
 STALE_SECONDS = 120
 NOT_FOUND = "We could not find that sales log. It may have been deleted."
 DAMAGED_DRAFT = "This draft is damaged. Discard it and capture the sales again."
+# M3 7.4: open submissions, stored input (sanitized photo, masked text) and baseline snapshots
+# are kept for 30 days; draftPayload is cleared on confirmation.
 RETENTION_DAYS = 30
-STALE_MESSAGE = "AI reading is temporarily unavailable. Type your sales in the form below. We kept your input."
+STALE_MESSAGE = "We could not read this right now. You can type the sales below."
 
 
 def owner_id():
@@ -153,6 +155,13 @@ def get_submission(submission_id):
         return result
 
 
+class ConfirmationError(HTTPException):
+    """Confirmation validation (HTTP 422, envelope code VALIDATION_ERROR) with field locations."""
+
+    def __init__(self, message, loc):
+        super().__init__(422, detail=[{"loc": ["body", *loc], "msg": message, "type": "value_error"}])
+
+
 def _same_value(left, right, field):
     if field == 'itemName':
         return str(left).strip() == str(right).strip()
@@ -178,7 +187,7 @@ def save_sales_records(request, *, today=None):
         if submission['status'] not in OPEN_STATES:
             raise HTTPException(409, "This sales log is still being read. Try again in a moment.")
         if submission['sale_date'] > (today or _today()):
-            raise HTTPException(400, "Sale date cannot be in the future")
+            raise ConfirmationError("Sale date cannot be in the future.", ["submissionId"])
         payload = _normalize_draft(submission['id'], submission['draft_payload'])
         drafts = {_line_key(line['lineId']): line for line in (payload or {}).get('lines', [])}
         ids, seen = [], set()
@@ -187,18 +196,21 @@ def save_sales_records(request, *, today=None):
             if line.draftLineId is not None:
                 key = _line_key(line.draftLineId)
                 if key in seen or key not in drafts:
-                    raise HTTPException(400, f"Row {index + 1}: unknown or duplicate draftLineId")
+                    raise ConfirmationError(f"Row {index + 1}: unknown or duplicate draft row. Reopen the draft.",
+                                            ["lines", index, "draftLineId"])
                 if line.source == 'MANUAL':
-                    raise HTTPException(400, f"Row {index + 1}: a linked draft row cannot have MANUAL source")
+                    raise ConfirmationError(f"Row {index + 1}: a row read by the AI cannot be marked as typed.",
+                                            ["lines", index, "source"])
                 seen.add(key)
                 draft = drafts[key]
             elif line.source == 'AI_EXTRACTED' or (drafts and line.source != 'MANUAL'):
-                raise HTTPException(400, f"Row {index + 1}: link the draft row or explicitly declare a new MANUAL row")
+                raise ConfirmationError(f"Row {index + 1}: link the draft row or mark it as a new typed row.",
+                                        ["lines", index, "source"])
             if draft is not None:
                 for field in ('itemName', 'quantity', 'unitPrice'):
                     band = draft.get('bands', {}).get(field, 'UNSCORED')
                     if band != 'HIGH' and _same_value(draft.get(field), getattr(line, field), field) and field not in line.verifiedFields:
-                        raise HTTPException(400, f"Row {index + 1}: verify or edit {field}")
+                        raise ConfirmationError(f"Row {index + 1}: tick or correct this value.", ["lines", index, field])
             record_id = uuid4()
             # SALES_RECORDS has no sale date of its own: it is the parent's (M3 7.1).
             conn.execute("INSERT INTO sales_records(id,submission_id,line_no,item_name,quantity,unit_price,source) VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -244,18 +256,22 @@ def _public_record(row):
             "unitPrice": row["unitPrice"], "lineTotal": row["quantity"] * row["unitPrice"], "source": row["source"]}
 
 
-def get_confirmed_records(start_date, end_date):
+def get_confirmed_records(start_date, end_date, limit=None, offset=0):
     """Confirmed history for the owner in an inclusive date range (GET /sales): newest date first,
-    then by submission and line number. Drafts never appear."""
+    then by submission and line number, so pages are stable. Drafts never appear.
+    Returns (records, total), where total counts every record in the range."""
+    where = "WHERE s.owner_id=%s AND s.status='CONFIRMED' AND s.sale_date BETWEEN %s AND %s"
+    args = (owner_id(), start_date, end_date)
     with connect() as conn:
         conn.row_factory = dict_row
+        total = conn.execute("SELECT count(*) AS n FROM sales_records r JOIN submissions s ON s.id=r.submission_id "
+                             + where, args).fetchone()["n"]
         rows = conn.execute("""SELECT r.id, r.line_no, r.submission_id AS "submissionId", r.item_name AS "itemName",
             r.quantity, r.unit_price AS "unitPrice", s.sale_date AS "saleDate", r.source
-            FROM sales_records r JOIN submissions s ON s.id=r.submission_id
-            WHERE s.owner_id=%s AND s.status='CONFIRMED' AND s.sale_date BETWEEN %s AND %s
-            ORDER BY s.sale_date DESC, s.created_at DESC, s.id, r.line_no""",
-            (owner_id(), start_date, end_date)).fetchall()
-    return [_public_record(row) for row in rows]
+            FROM sales_records r JOIN submissions s ON s.id=r.submission_id """ + where + """
+            ORDER BY s.sale_date DESC, s.created_at DESC, s.id, r.line_no LIMIT %s OFFSET %s""",
+            (*args, limit, offset)).fetchall()
+    return [_public_record(row) for row in rows], total
 
 
 def get_confirmed_sales_between(start_date, end_date):
@@ -296,6 +312,29 @@ def list_open_submissions():
 def _enqueue_image_deletion(conn, image_key):
     if image_key:
         conn.execute("INSERT INTO image_deletion_jobs(image_key) VALUES (%s) ON CONFLICT DO NOTHING", (image_key,))
+
+
+def queued_image_count():
+    with connect() as conn:
+        return conn.execute("SELECT count(*) FROM image_deletion_jobs").fetchone()[0]
+
+
+def unreferenced_image_keys(keys):
+    """Keys in object storage that no submission or deletion job refers to: orphans left when a
+    database write failed after the photo was stored and the compensating delete also failed."""
+    keys = list(keys)
+    if not keys:
+        return []
+    with connect() as conn:
+        used = {row[0] for row in conn.execute("""SELECT image_key FROM submissions WHERE image_key = ANY(%s)
+            UNION SELECT image_key FROM image_deletion_jobs WHERE image_key = ANY(%s)""", (keys, keys)).fetchall()}
+    return [key for key in keys if key not in used]
+
+
+def enqueue_image_deletions(keys):
+    with connect() as conn:
+        for key in keys:
+            _enqueue_image_deletion(conn, key)
 
 
 def delete_submission(submission_id):

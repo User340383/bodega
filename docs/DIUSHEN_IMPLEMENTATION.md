@@ -259,3 +259,12 @@ These commands ran on Windows on 2026-11-04 with Python 3.12, pandas 3.1.1, Node
 - **Insufficient history** in guidance is now 409 INSUFFICIENT_HISTORY (M3 4.2).
 - **Exactness tests** use the final limits (99,999.99); arbitrary-precision math stays covered in `test_analysis_math.py`.
 - **NFR-703 measured:** p95 0.159 s at 5,000 records (`test_performance.py`).
+
+## 13. Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Your analysis, guidance and dashboard are unchanged from this report.** For one day the working tree used the Milestone 2 all-history formula without trends (D-26); that was withdrawn because WorkDivision assigns 7-day moving averages, trend classification and trend directions on the dashboard. The files are identical to the committed versions except for the points below.
+- **Changes in your files, for your review:** an invalid `asOf` answers 400 directly (M3 4.2). `ClaudeLLMService` requires exactly one schema-valid `write_guidance` call, uses `max_tokens` 1024 and a 15-second per-call timeout (D-35). New regression tests in `tests/test_integration_regressions.py` pin the 7-logged-day average, the trend, the suggested stock, the snapshot shape and the 409.
+- **Known limit:** a suggested stock above 2,147,483,647 cannot be saved in the snapshot column; the confirmed-row limits make that unreachable.
+- Real Claude wording still needs an authorized `AI_API_KEY`.

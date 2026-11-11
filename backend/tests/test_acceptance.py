@@ -109,8 +109,8 @@ def test_ac04_invalid_fields_block_confirmation(client, changes):
     repository.update_status(sid, 'AI_UNAVAILABLE')
     row = {'itemName': 'Bread', 'quantity': '1', 'unitPrice': '0', **changes}
     response = client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': [row]})
-    assert response.status_code == 400 and response.json()['error']['fields']
-    assert client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': []}).status_code == 400
+    assert response.status_code == 422 and response.json()['error']['fields']
+    assert client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': []}).status_code == 422
     ok = client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': [
         {'itemName': 'Bread', 'quantity': '1', 'unitPrice': '0'}]})
     assert ok.status_code == 201  # Nonblank item, quantity 1, price 0 passes.
@@ -137,7 +137,7 @@ def test_ac14_high_confidence_prefilled_and_uncertain_value_requires_verificatio
     assert (bread['quantity'], bread['unitPrice']) == ('3', '2')
     base = {'draftLineId': bread['lineId'], 'itemName': 'bread', 'quantity': '3', 'unitPrice': '2.00'}
     blocked = client.post('/api/v1/confirm', json={'submissionId': draft['submissionId'], 'lines': [base]})
-    assert blocked.status_code == 400  # Not verified.
+    assert blocked.status_code == 422  # Not verified.
     saved = client.post('/api/v1/confirm', json={'submissionId': draft['submissionId'],
                                                 'lines': [{**base, 'verifiedFields': ['unitPrice']}]})
     assert saved.status_code == 201
@@ -155,7 +155,7 @@ def test_ac15_low_or_missing_confidence_and_band_boundaries(client):
     assert boundary['bands'] == {'quantity': 'HIGH', 'unitPrice': 'MEDIUM', 'itemName': 'LOW'}  # 0.85 / 0.60 / 0.59
     row = {'draftLineId': milk['lineId'], 'itemName': 'milk', 'quantity': '2', 'unitPrice': '1.50'}
     sid = draft['submissionId']
-    assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [row]}).status_code == 400  # Price unverified.
+    assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [row]}).status_code == 422  # Price unverified.
     assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [
         {**row, 'verifiedFields': ['unitPrice']}]}).status_code == 201
 
@@ -169,7 +169,7 @@ def test_ac16_unreadable_image_and_the_040_boundary(client, legibility, rows):
     assert len(body['lines']) == rows
     if not rows:
         assert body['status'] == 'REJECTED' and body['manualEntry'] is True
-        assert body['message'].startswith('Image could not be read') and 'flat' in body['message']
+        assert body['message'].startswith('We could not read this photo') and 'flat' in body['message']
     assert records() == 0
 
 
@@ -218,7 +218,7 @@ def test_ac17_timeout_twice_retains_text_and_date_and_offers_manual_entry(client
     model, _ = stub(fail_modes=['timeout', 'timeout'])
     body = client.post('/api/v1/extract', data={'saleDate': DATE, 'text': 'Bread 3 2.00'}).json()
     assert len(model.calls) == 2  # Retried automatically once.
-    assert body['message'].startswith('AI reading is temporarily unavailable')
+    assert body['message'].startswith('We could not read this right now')
     assert (body['manualEntry'], body['maskedText'], body['saleDate']) == (True, 'Bread 3 2.00', DATE)
     assert records() == 0
     retried = MockVisionModel(fail_modes=['timeout'])
@@ -236,7 +236,7 @@ def test_ac18_manual_entry_saves_with_no_ai_request(client):
         ('bread', '4', '2.00')]
     zero = client.post('/api/v1/manual-entries', json={'submissionId': str(uuid4()), 'saleDate': DATE,
                                                       'lines': [{'itemName': 'bread', 'quantity': '0', 'unitPrice': '2.00'}]})
-    assert zero.status_code == 400 and 'lines.0.quantity' in zero.json()['error']['fields']
+    assert zero.status_code == 422 and 'lines.0.quantity' in zero.json()['error']['fields']
 
 
 def test_ac19_personal_data_is_removed_before_ai_processing(client):
@@ -285,7 +285,8 @@ def test_ac21_delete_all_also_removes_raw_input_and_waits_for_processing(client)
     assert refused.status_code == 409 and len(storage.objects) == 1  # Nothing deleted while one is being read.
     repository.update_status(processing, 'AI_UNAVAILABLE')
     deleted = client.post('/api/v1/data/delete-all', json={'confirmation': 'DELETE'}).json()
-    assert deleted == {'recordsDeleted': 0, 'submissionsDeleted': 2, 'message': '0 records deleted'}
+    assert deleted == {'recordsDeleted': 0, 'submissionsDeleted': 2, 'imagesPendingDeletion': 0,
+                       'message': '0 records deleted'}
     assert storage.objects == {}
     with connect() as conn:
         assert conn.execute('SELECT count(*) FROM submissions').fetchone()[0] == 0

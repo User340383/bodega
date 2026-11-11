@@ -105,11 +105,11 @@ describe('Sales capture', () => {
 
   it('falls back to manual entry when the AI is unavailable', async () => {
     const result = draft({ status: 'AI_UNAVAILABLE', manualEntry: true,
-      message: 'AI reading is temporarily unavailable. You can type the sales below.' })
+      message: 'We could not read this right now. You can type the sales below.' })
     const { user, onDraft } = setup(vi.fn().mockResolvedValue(result))
     await user.upload(screen.getByLabelText('Photo of your sales page'), photo())
     await user.click(readPhoto())
-    expect(await screen.findByText(/AI reading is temporarily unavailable/)).toBeInTheDocument()
+    expect(await screen.findByText(/We could not read this right now/)).toBeInTheDocument()
     expect(screen.getByText(/Add row/)).toBeInTheDocument()
     expect(onDraft).toHaveBeenCalledWith(result)  // DraftReview opens with an empty manual form.
   })

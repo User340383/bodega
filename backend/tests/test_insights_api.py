@@ -172,7 +172,9 @@ def test_more_than_100_input_records_are_all_analyzed(client):
     dates = logged_dates(7)
     for day in dates:
         confirm(client, day, [('Bread', '1')] * 30)
-    assert len(client.get('/api/v1/sales').json()['records']) == 210  # The 28-day ledger is not paged.
+    ledger = client.get('/api/v1/sales').json()  # M3 4.2: 200 records per page; analysis reads every row.
+    assert (len(ledger['records']), ledger['total'], ledger['hasMore']) == (200, 210, True)
+    assert len(client.get('/api/v1/sales', params={'limit': 500}).json()['records']) == 210
     estimate = analysis(client)['estimates'][0]
     assert estimate['currentTotal'] == '210'
     assert (estimate['currentAverage'], estimate['suggestedQty']) == ('30', '210')
@@ -236,7 +238,7 @@ def test_quantities_outside_the_final_limits_are_rejected_before_analysis(client
     repository.update_status(sid, 'AI_UNAVAILABLE')
     response = client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': [
         {'itemName': 'Bread', 'quantity': quantity, 'unitPrice': '1.00'}]})
-    assert response.status_code == 400
+    assert response.status_code == 422  # Confirmation validation (D-30).
     assert response.json()['error']['code'] == 'VALIDATION_ERROR'
     assert analysis(client)['status'] == 'NO_DATA'
 

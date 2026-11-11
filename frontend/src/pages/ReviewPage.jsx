@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { rememberDraft } from '../auth/session'
 import DraftReview from '../components/DraftReview'
@@ -27,6 +27,8 @@ export default function ReviewPage() {
   const initial = handed && String(handed.submissionId) === submissionId ? handed : null
   const [state, setState] = useState({ draft: initial, loading: !initial, error: '' })
   const [confirmed, setConfirmed] = useState(false)
+  const [action, setAction] = useState({ busy: '', message: '' })
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (initial) return undefined
@@ -48,16 +50,31 @@ export default function ReviewPage() {
 
   const { draft } = state
   const fallback = FALLBACK_TEXT[draft.status]
+  const open = ['NEEDS_VERIFICATION', 'AI_UNAVAILABLE', 'REJECTED'].includes(draft.status) && !confirmed
+
+  // FR-216: an open draft can be discarded from here as well as from Pending drafts.
+  async function discard() {
+    setAction({ busy: 'discard', message: '' })
+    try {
+      await request(`/api/v1/submissions/${encodeURIComponent(submissionId)}`, { method: 'DELETE' })
+      navigate('/drafts')
+    } catch (error) {
+      setAction({ busy: '', message: `${error.message} The draft was kept.` })
+    }
+  }
   return <>
     {fallback && <div className="status-note" role="status">
       <p>{draft.message || fallback}</p>
       {draft.status === 'REJECTED' && draft.inputType === 'IMAGE' &&
         <Link className="button-link" to="/capture">Retake the photo</Link>}
     </div>}
+    {action.message && <p role="status" className="status-note">{action.message}</p>}
     <div className="review-layout">
       <SourcePanel draft={draft} />
       <DraftReview key={String(draft.submissionId)} draft={draft} request={request} onConfirmed={() => setConfirmed(true)} />
     </div>
+    {open && <p><button type="button" className="secondary" disabled={Boolean(action.busy)} onClick={discard}>
+      {action.busy === 'discard' ? 'Discarding…' : 'Discard this draft'}</button></p>}
     {confirmed && <nav aria-label="Next steps" className="link-row">
       <Link className="button-link" to="/capture">Capture more sales</Link>
       <Link className="button-link" to="/history">View history</Link>

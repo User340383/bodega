@@ -8,8 +8,8 @@ export const MAX_TEXT_CHARS = 5000
 export const REQUEST_TIMEOUT_MS = 90_000
 
 export const FALLBACK_TEXT = {
-  AI_UNAVAILABLE: 'AI reading is temporarily unavailable. Type your sales in the form below. We kept your input.',
-  REJECTED: 'Image could not be read. Retake the photo with good light, the page flat and fully in frame, or type the sales below.',
+  AI_UNAVAILABLE: 'We could not read this right now. You can type the sales below.',
+  REJECTED: 'We could not read this photo. Use good light, lay the page flat, and fit the whole page in the frame. You can also type the sales below.',
 }
 
 export function localToday(now = new Date()) {

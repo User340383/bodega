@@ -36,7 +36,7 @@ if not getattr(_base_factory, "_bodega", False):
 ALLOWED_FIELDS = (
     "operation", "method", "status", "errorCategory", "errorCode", "durationMs", "latencyMs",
     "submissionId", "attempt", "markedStale", "openDeleted", "inputsCleared", "snapshotsDeleted",
-    "imagesDeleted", "imageDeletesFailed", "provider", "rule",
+    "imagesDeleted", "imageDeletesFailed", "orphansQueued", "imagesPending", "provider", "rule",
 )
 
 

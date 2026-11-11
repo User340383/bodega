@@ -91,7 +91,7 @@ def test_confirm_and_repeat_and_history(client):
 @pytest.mark.parametrize('changes', [{'itemName': '  '}, {'quantity': '0'}, {'quantity': '-1'}, {'quantity': 'NaN'}, {'quantity': 'Infinity'}, {'unitPrice': '-0.01'}, {'unitPrice': 'NaN'}, {'unitPrice': 'Infinity'}])
 def test_invalid_values_leave_draft_unchanged(client, changes):
     sid = make_submission()
-    assert client.post('/api/v1/confirm', json=body(sid, **changes)).status_code == 400
+    assert client.post('/api/v1/confirm', json=body(sid, **changes)).status_code == 422
     assert counts(sid) == ('NEEDS_VERIFICATION', 0)
 
 
@@ -99,8 +99,8 @@ def test_empty_unknown_and_ineligible(client):
     sid = make_submission('CLASSIFYING')
     assert client.post('/api/v1/confirm', json=body(sid)).status_code == 409
     assert client.post('/api/v1/confirm', json=body(uuid4())).status_code == 404
-    assert client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': []}).status_code == 400
-    assert client.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []}).status_code == 400
+    assert client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': []}).status_code == 422
+    assert client.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []}).status_code == 422
     assert counts(sid) == ('CLASSIFYING', 0)
 
 
@@ -122,7 +122,7 @@ def test_partial_insert_rolls_back_on_later_verification_failure(client):
     sid = make_submission(payload={'lines': [{'lineId': 'a', 'itemName': 'Milk', 'quantity': 2, 'unitPrice': 1, 'bands': {'itemName': 'HIGH', 'quantity': 'HIGH', 'unitPrice': 'MEDIUM'}}]})
     request = body(sid, source='MANUAL')
     request['lines'].append({'draftLineId': 'a', 'itemName': 'Milk', 'quantity': 2, 'unitPrice': 1})
-    assert client.post('/api/v1/confirm', json=request).status_code == 400
+    assert client.post('/api/v1/confirm', json=request).status_code == 422
     assert counts(sid) == ('NEEDS_VERIFICATION', 0)
     request['lines'][1]['verifiedFields'] = ['unitPrice']
     assert client.post('/api/v1/confirm', json=request).status_code == 201
@@ -274,7 +274,7 @@ def uncertain_line(**overrides):
 def test_extracted_row_cannot_bypass_review_by_omitting_link(client, changes):
     sid = make_submission(payload={'lines': [uncertain_line()]})
     response = client.post('/api/v1/confirm', json=body(sid, **changes))
-    assert response.status_code == 400, response.text
+    assert response.status_code == 422, response.text
     assert counts(sid) == ('NEEDS_VERIFICATION', 0)
     assert client.get('/api/v1/submissions/' + str(sid)).json()['lines'][0]['unitPrice'] == '1.20'
 
@@ -296,7 +296,7 @@ def test_explicit_manual_row_beside_extraction_and_inconsistent_sources(client):
     for overrides in ({'draftLineId': 'a', 'source': 'MANUAL', 'verifiedFields': ['unitPrice']},
                       {'source': 'UNKNOWN'}, {'source': 'AI_EXTRACTED'}):
         response = client.post('/api/v1/confirm', json=body(sid, **overrides))
-        assert response.status_code == 400
+        assert response.status_code == 422
         assert counts(sid) == ('NEEDS_VERIFICATION', 0)
     request = body(sid, draftLineId='a', verifiedFields=['unitPrice'])
     request['lines'].append(body(sid, itemName='Milk', source='MANUAL')['lines'][0])
@@ -312,7 +312,7 @@ def test_unknown_and_duplicate_confirmation_links_roll_back(client):
         request['lines'] = [request['lines'][0],
                             body(sid, draftLineId=invalid_id, verifiedFields=['unitPrice'])['lines'][0]]
         response = client.post('/api/v1/confirm', json=request)
-        assert response.status_code == 400
+        assert response.status_code == 422
         assert counts(sid) == ('NEEDS_VERIFICATION', 0)
 
 
@@ -332,9 +332,9 @@ def test_legacy_draft_without_ids_reopens_and_confirms_without_500(client):
     assert lines == client.get(url).json()['lines']
     assert lines[0]['lineId'] and lines[0]['lineId'] != 'preserved'
     assert lines[1]['lineId'] == 'preserved'
-    assert client.post('/api/v1/confirm', json=body(sid)).status_code == 400
+    assert client.post('/api/v1/confirm', json=body(sid)).status_code == 422
     request = body(sid, draftLineId=lines[0]['lineId'])
-    assert client.post('/api/v1/confirm', json=request).status_code == 400
+    assert client.post('/api/v1/confirm', json=request).status_code == 422
     assert counts(sid) == ('NEEDS_VERIFICATION', 0)
     request['lines'][0]['verifiedFields'] = ['unitPrice']
     assert client.post('/api/v1/confirm', json=request).status_code == 201
@@ -351,7 +351,7 @@ def test_ids_are_persisted_on_create_and_update_and_missing_bands_require_review
     repository.update_status(sid, 'NEEDS_VERIFICATION', draft_payload={'lines': [uncertain_line(lineId=None, bands=None)]})
     assert client.get('/api/v1/submissions/' + str(sid)).json()['lines'][0]['lineId'] == line_id
     request = body(sid, draftLineId=line_id)
-    assert client.post('/api/v1/confirm', json=request).status_code == 400
+    assert client.post('/api/v1/confirm', json=request).status_code == 422
     request['lines'][0]['verifiedFields'] = ['itemName', 'quantity', 'unitPrice']
     assert client.post('/api/v1/confirm', json=request).status_code == 201
 
@@ -402,7 +402,7 @@ def test_final_limits_accept_boundaries(client, quantity, price, label):
 def test_final_limits_reject_values_outside_the_contract(client, changes):
     sid = make_submission('AI_UNAVAILABLE')
     response = client.post('/api/v1/confirm', json=body(sid, **changes))
-    assert response.status_code == 400
+    assert response.status_code == 422
     error = response.json()['error']
     assert error['code'] == 'VALIDATION_ERROR' and error['fields']
     assert counts(sid) == ('AI_UNAVAILABLE', 0)
@@ -436,15 +436,30 @@ def test_extraction_validation_returns_400_with_field_details_and_no_submission(
         assert conn.execute('SELECT count(*) FROM submissions').fetchone()[0] == 0
 
 
-def test_every_validation_error_is_400_with_the_m3_envelope(client):
-    for response in (client.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []}),
-                     client.post('/api/v1/guidance', json={'asOf': 'bad'}),
-                     client.get('/api/v1/sales?start=bad'),
-                     client.get('/api/v1/sales?start=2026-05-02&end=2026-05-01'),
-                     client.get('/api/v1/sales?start=2025-01-01&end=2026-05-01')):
-        assert response.status_code == 400, response.text
+def test_validation_errors_use_the_envelope_400_except_confirmation_422(client):
+    """D-30: extraction and every other request answer 400; confirming sales rows answers 422.
+    Both use the M3 4.2 envelope {error: {code, message, fields}}."""
+    expected = [
+        (client.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []}), 422),
+        (client.post('/api/v1/manual-entries', json={'submissionId': 'bad', 'lines': []}), 422),
+        (client.post('/api/v1/extract', data={'saleDate': 'bad', 'text': 'Bread 3'}), 400),
+        (client.post('/api/v1/guidance', json={'asOf': 'bad'}), 400),
+        (client.get('/api/v1/analysis?asOf=2999-01-01'), 400),
+        (client.get('/api/v1/sales?start=bad'), 400),
+        (client.get('/api/v1/sales?end=2026-02-30'), 400),
+        (client.get('/api/v1/sales?start=2026-05-02&end=2026-05-01'), 400),
+        (client.get('/api/v1/sales?start=2025-01-01&end=2026-05-01'), 400),
+        (client.get('/api/v1/sales?limit=0'), 400),
+        (client.get('/api/v1/sales?limit=501'), 400),
+        (client.get('/api/v1/sales?offset=-1'), 400),
+    ]
+    for response, status in expected:
+        assert response.status_code == status, response.text
         error = response.json()['error']
         assert error['code'] == 'VALIDATION_ERROR' and error['message'] and isinstance(error['fields'], dict)
+        assert error['fields'], response.text
+    paths = client.get('/openapi.json').json()['paths']
+    assert '422' in paths['/api/v1/confirm']['post']['responses']
     responses = client.get('/openapi.json').json()['paths']['/api/v1/extract']['post']['responses']
     assert '400' in responses and '422' not in responses
 
@@ -495,7 +510,7 @@ def test_migration_upgrade_preserves_existing_records_and_nonblank_checks(db, mo
             assert conn.execute('SELECT as_of_date FROM baseline_estimates WHERE id=%s', (baseline_id,)).fetchone()[0] is None
         assert repository.get_latest_baselines() == []
         # The dropped per-row date is recovered from the parent in every read.
-        assert {(r['recordId'], r['saleDate'], r['lineNo']) for r in repository.get_confirmed_records(day, day)} == {
+        assert {(r['recordId'], r['saleDate'], r['lineNo']) for r in repository.get_confirmed_records(day, day)[0]} == {
             (original_ids[0], day, 1), (original_ids[1], day, 2), (original_ids[2], day, 3)}
         assert counts(sid) == ('CONFIRMED', 3)
         from app.main import ConfirmRequest

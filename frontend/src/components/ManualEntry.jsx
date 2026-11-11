@@ -13,12 +13,14 @@ export default function ManualEntry({ request, onSaved, today = localToday }) {
   const [rows, setRows] = useState(() => [blankRow()])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [serverFields, setServerFields] = useState({})  // 422 error.fields, e.g. "lines.0.quantity"
   const [saved, setSaved] = useState(null)
   const maxDate = today()
   const dateProblem = !saleDate ? 'Choose the sale date.' : saleDate > maxDate ? 'Sale date cannot be in the future.' : ''
   const invalid = Boolean(dateProblem) || rows.length === 0 || rows.some(row => FIELDS.some(field => fieldError(row, field)))
 
   function change(key, field, value) {
+    setServerFields({})
     setRows(rows.map(row => row.key === key ? { ...row, [field]: value } : row))
   }
 
@@ -36,6 +38,7 @@ export default function ManualEntry({ request, onSaved, today = localToday }) {
       onSaved?.(result)
     } catch (err) {
       setError(err.message)
+      setServerFields(err.fields || {})
     } finally {
       setBusy(false)
     }
@@ -54,13 +57,13 @@ export default function ManualEntry({ request, onSaved, today = localToday }) {
     <fieldset disabled={busy || Boolean(saved)}>
       <label>Sale date <input type="date" required value={saleDate} max={maxDate}
         onChange={event => setSaleDate(event.target.value)} /></label>
-      {dateProblem && <p className="field-error">{dateProblem}</p>}
+      {(dateProblem || serverFields.saleDate) && <p className="field-error">{dateProblem || serverFields.saleDate}</p>}
       <div className="table-scroll"><table>
         <thead><tr>{FIELDS.map(field => <th key={field} scope="col">{LABELS[field]}</th>)}<th scope="col">Actions</th></tr></thead>
         <tbody>{rows.map((row, index) => <tr key={row.key}>
           {FIELDS.map(field => {
             const touched = row[field] !== ''
-            const problem = touched ? fieldError(row, field) : ''
+            const problem = (touched ? fieldError(row, field) : '') || serverFields[`lines.${index}.${field}`] || ''
             const errorId = `manual-${index}-${field}-error`
             return <td key={field}>
               <label>

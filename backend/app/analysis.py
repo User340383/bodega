@@ -308,5 +308,6 @@ def resolve_as_of(requested: date | None, clock: Clock, location: list[str]) -> 
     elif as_of < date.min + timedelta(days=HISTORY_CALENDAR_DAYS - 1):
         problem = "asOf is too early to calculate a 28-day history period"
     if problem:
-        raise HTTPException(422, detail=[{"loc": location, "msg": problem, "type": "value_error"}])
+        # M3 4.2: GET /analysis answers 400 for an invalid asOf.
+        raise HTTPException(400, detail=[{"loc": location, "msg": problem, "type": "value_error"}])
     return as_of

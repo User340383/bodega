@@ -6,7 +6,8 @@
 |---|---|
 | M1 | `Milestone_1_Project_Proposal_and_Opportunity_Study.docx` |
 | M2 | `Milestone_2_final.docx`: SRS v2.0, baselined; 99.7% identical to the earlier SRS text. Its only requirement change: FR-211 drops the "retained input deleted within 24 hours" clause. |
-| M3 | `Milestone_3_Final.pdf` (October 23, 2026). Its section 3 changes and adds requirements; those win over M2. |
+| M3 | `Milestone_3_Formal_Analysis_and_Design-1.pdf` (Version 1.0, October 23, 2026). Its section 3 changes and adds requirements; those win over M2. |
+| M4 | `WorkDivision.docx`: the Milestone 4 deliverables per member. With M3 it is the reference for the Milestone 4 review below. |
 
 The original documents were read, never modified.
 
@@ -18,6 +19,66 @@ The original documents were read, never modified.
 | **V\*** | Implemented and verified only against a stand-in for an external service, as the SRS allows for acceptance tests. The real service was not exercised. |
 | **P** | Implemented in part, or verified in part. The gap is named. |
 | **B** | Blocked by something this environment cannot provide (credentials, deployment, people, real data). |
+
+## Milestone 4 — WorkDivision deliverables (review of 2026-11-10)
+
+References: `WorkDivision.docx` (the Milestone 4 deliverables, read in full with both tables and the
+execution steps) and the final Milestone 3 (design). Milestones 1 and 2 are not references for this
+section. Status letters are defined above. Decisions are in `docs/INTEGRATION_DECISIONS.md`.
+
+### Luis Heyaime — DevOps, CI/CD, application shell
+
+| WorkDivision deliverable | Implementation | Test evidence | Status and blockers |
+|---|---|---|---|
+| Scaffold `/frontend` and `/backend`; `docker-compose.yml` starts React, FastAPI and PostgreSQL with one command | `docker-compose.yml` (frontend, backend, postgres:16, minio), `backend/Dockerfile`, `frontend/Dockerfile` | `docker compose up -d --build --wait` on empty volumes: 4 services up, `/health` 200, SPA served, 401 without the access code | V |
+| Manage `.env` secrets | `.env.example` lists every variable; secrets only in backend environment; startup checks | `test_security.py`; gitleaks in CI | V |
+| Render deployment configuration | `render.yaml`; deploy job posts the Render hooks only after every check passes on `main` | Production images build; frontend image serves `/capture`, `config.js` and HSTS | **B** for the live deployment: needs the Render account, deploy-hook secrets and a database plan |
+| GitHub Actions runs the automated suites on every pull request | `.github/workflows/ci.yml` on every PR to `main`: Backend Tests, HTTP Smoke Test, Frontend Tests, Lint and Build, Lint and Secret Scan, Production Images | PR #7 checks green before this review; all jobs' commands re-run locally (section 4) | V. The new HTTP Smoke Test job has not run on GitHub yet |
+| Branch protection requiring peer reviews | Ruleset "Protect main branch" (active): pull request with 1 approving review, stale approvals dismissed, threads resolved, 3 required checks, no force push or deletion | Read with `gh api repos/User340383/bodega/rulesets/26400400` | V. Open: add the two newer jobs to the required checks (repository setting) |
+| React application shell, navigation routing, global API client | `frontend/src/App.jsx`, `layout/AppLayout.jsx`, `auth/*`, `api/client.js`, pages for `/login`, `/capture`, `/review/:id`, `/drafts`, `/history`, `/analysis` | `App.test.jsx`, `api/client.test.js` | V |
+
+### José Javier Otazu — AI ingestion, security QA, capture UI
+
+| WorkDivision deliverable | Implementation | Test evidence | Status and blockers |
+|---|---|---|---|
+| `POST /api/v1/extract` | `main.extract`, `ingestion.InferenceService`, `vision.py` | `test_ingestion.py`, `test_acceptance.py`, smoke | V\* (mock model). **B** for real Claude: no `AI_API_KEY` |
+| File validation, 10 MiB limit | Magic bytes (JPEG/PNG), 10,485,760 bytes, 40 megapixels, sale-date and text rules; 400 and nothing stored | `test_invalid_inputs.py` (30 cases), boundary test at the exact byte limit | V |
+| Pillow EXIF metadata stripping | `privacy.sanitize_image`: orientation applied, pixels re-encoded as JPEG q85, long edge 2,048 px | `test_privacy.py`: EXIF/GPS absent from what is stored and sent | V |
+| Regex contact masking | `privacy.mask_text` (M3 9.5 pattern, D-20, D-28), applied before storage, before the AI call and to AI output | `test_masking.py` (50+ cases), `test_integration_regressions.py` (prices of 7 digits stay intact) | V |
+| 30-second timeout and retry for the VisionModel call | 30 s per attempt, one retry after 1 s for timeout/429/5xx/network/invalid schema, then `AI_UNAVAILABLE` | `test_ingestion.py`, `test_resilience.py` (20 forced timeouts) | V |
+| Security QA: unit tests proving EXIF and PII are stripped before AI processing | `test_privacy.py`, `test_masking.py`, `test_ingestion.py` (model and storage receive only sanitized or masked input) | Part of the 646-test run | V |
+| Capture UI: photo upload, loading state, manual-entry fallback form | `components/SalesCapture.jsx`, `ManualEntry.jsx`, `captureRules.js`, `pages/CapturePage.jsx` | `SalesCapture.test.jsx`, `ManualEntry.test.jsx` | V |
+
+### Diushen Cabrera — analysis, guidance, integration tests, dashboard
+
+| WorkDivision deliverable | Implementation | Test evidence | Status and blockers |
+|---|---|---|---|
+| `GET /api/v1/analysis` with pandas 7-day moving averages and trend classification | `analysis.BaselineAnalyzer` (M3 5.5: latest 7 logged days in 28, trend over 14, suggested stock) | `test_analysis_math.py`, `test_insights_api.py`, `test_integration_regressions.py`, smoke (4.0 per logged day, 28) | V. Restored on 2026-11-10 (D-26 withdrawn) |
+| `POST /api/v1/guidance` with grounding checks; no unsupported claims returned | `guidance.GuidanceEngine`, `grounding.check_grounding` (M3 9.6 rules 1–7), Standard advice fallback, 409 with fewer than 7 logged days | `test_grounding.py` (one failing case per rule), `test_llm_provider.py`, `test_readability.py` | V\* (mock and fake client). **B** for real Claude wording |
+| Integration tests using MockVisionModel and MockLLMService | `tests/mock_vision.py`, `test_vision_output_to_guidance.py` (draft → confirm → analysis → guidance) | Part of the 646-test run | V |
+| Results dashboard: baseline estimates, trend directions (UP/DOWN/STABLE), plain-text restocking alerts | `components/ResultsDashboard.jsx`, `SalesTrendChart.jsx`, `pages/AnalysisPage.jsx` | `ResultsDashboard.test.jsx` | V. Restored on 2026-11-10 |
+
+### Gabriel Marte — data and state, database tests, draft review and history
+
+| WorkDivision deliverable | Implementation | Test evidence | Status and blockers |
+|---|---|---|---|
+| PostgreSQL schema: OWNERS, SUBMISSIONS, SALES_RECORDS, BASELINE_ESTIMATES | `backend/migrations/001`–`006` applied by Alembic revisions 001–006; `app/models.py` | `test_database.py`, `test_models.py`; `alembic current` = `006 (head)` on a fresh database | V |
+| `POST /api/v1/confirm`: transactional save and status update | `repository.save_sales_records`: row lock, all rows and CONFIRMED in one transaction, idempotent repeat | `test_database.py`, `test_final_contract.py`, smoke (201 then 200 with the same IDs) | V. Open decision D-30 (422 or 400 for invalid rows) |
+| Database tests: transactions roll back on failure; duplicate confirmations are blocked | `test_database.py` (partial insert rolls back, concurrent and repeated confirmation), NFR-725 restart trial | Part of the 646-test run | V |
+| Interactive Draft Review table with highlighted fields | `components/DraftReview.jsx`, `draftRules.js`, `pages/ReviewPage.jsx`, `DraftsPage.jsx` | `SalesReview.test.jsx`, `DraftPages.test.jsx` | V |
+| Confirmed Sales History ledger | `components/SalesHistory.jsx`, `GET /api/v1/sales` | `SalesReview.test.jsx`, `test_final_contract.py`, `test_integration_regressions.py` (range and paging) | V |
+
+### Immediate execution steps
+
+| Step | Implementation | Evidence | Status |
+|---|---|---|---|
+| 1. One command starts frontend, backend and PostgreSQL | `docker compose up --build` | Run on empty volumes on 2026-11-10 | V |
+| 2. Schema migrations and a small SQL seed script with synthetic sales (bread, milk) | Migrations run at backend start; `backend/seeds/synthetic_sales.sql` (new, D-34) | Run twice with `psql` (14 dates added, then 0); `/analysis` READY: Bread 4.0 UP 28, Milk 2.5 STABLE 18; regression test | V |
+| 3. API contract stubs for `/extract`, `/confirm`, `/analysis`, `/guidance` | Superseded: all four endpoints have their real implementation | Smoke test calls each | V |
+
+**Open items for Milestone 4 that cannot be closed locally:** live Claude extraction and wording
+(authorized `AI_API_KEY`); R2 storage check (`S3_*` credentials); Render deployment and HTTPS;
+the team decisions listed in `docs/INTEGRATION_DECISIONS.md`.
 
 ## 0. Milestone 1 — proposal commitments
 
@@ -61,8 +122,8 @@ The original documents were read, never modified.
 | FR-202–FR-204 | V | → AC-03, AC-04, `test_database` limits, `SalesReview.test` |
 | FR-205 | V | → AC-04 (service error, unreadable response, no rows) |
 | FR-206–FR-209 | V | → AC-14, AC-15 (boundaries 0.85 / 0.60 / 0.59), "Could not read — enter value" |
-| FR-210 | V | → AC-16 (0.35 rejected, 0.40 accepted, "Image could not be read" + retake + manual) |
-| FR-211 | V | → AC-17 (two timeouts → "AI reading is temporarily unavailable", text and date kept, manual entry), `test_resilience` |
+| FR-210 | V | → AC-16 (0.35 rejected, 0.40 accepted, "We could not read this photo" + retake + manual, M3 9.4) |
+| FR-211 | V | → AC-17 (two timeouts → "We could not read this right now", text and date kept, manual entry), `test_resilience` |
 | FR-212, FR-213 | V | → AC-19 exact output, `test_masking` (50+ cases), EXIF/GPS removal from what is sent and stored |
 | FR-214 | V | → `SalesCapture.test` (exact M3 9.7 notice) |
 | FR-215 | V | 30-day purge (M3) → `test_final_contract` |
@@ -131,22 +192,26 @@ All timings follow the SRS 5 rule: at least 50 trials, the 95th percentile, and 
 
 ## 4. Verification run on this branch
 
-Final run on HEAD `32ffbdd`, 2026-11-09, in isolated Compose projects with temporary in-memory databases:
+Run on 2026-11-10 on the working tree of `work/srs-completion` (commit recorded in the pull
+request), in isolated Compose projects with temporary databases and synthetic data only:
 
 | Check | Result |
 |---|---|
-| Backend pytest | **608 passed, 1 skipped**, 0 failed. The skip is the Dockerfile guard: it passed natively and runs as a CI step. |
-| `alembic upgrade head` (CI step) | Pass |
-| Frontend ESLint, Vitest, Vite build | Lint clean; **127 passed**; build OK |
-| HTTP smoke test | PASS |
-| `prodcheck.py` | 13/13 checks pass |
-| Browser timings | All 5 targets pass at p95 (above) |
-| Cross-engine workflow | 5/5 configurations pass |
-| axe and layout check on the Tailwind production bundle | 20/20 page × width combinations pass |
-| NFR-725 restart trial | 10/10 pass |
-| ruff | 0 findings |
-| gitleaks | 0 leaks (history, branches, working tree, browser bundle) |
-| Mermaid | 14/14 diagrams render |
+| Backend pytest against disposable PostgreSQL 16 | **646 passed, 1 skipped**, 0 failed. The skip is the Dockerfile guard, which runs as a CI step. |
+| Migrations | `alembic upgrade head` on an empty database, and again as a no-op; `alembic current` = `006 (head)` |
+| Frontend ESLint, Vitest, Vite build | Lint clean; **132 passed** (9 files); build OK |
+| Ruff 0.17.4 (`ruff check backend`) | 0 findings |
+| HTTP smoke test (PostgreSQL, MinIO, SPA proxy, two backends) | PASS |
+| Production images | Backend and frontend images build; the frontend image serves `/capture`, `config.js` and HSTS |
+| One-command local stack | `docker compose up -d --build --wait` on empty volumes; extract, analysis and guidance answered over HTTP |
+| SQL seed script | Applied twice with `psql`; analysis READY with the documented figures |
+| Live Claude check (`scripts/live_ai_check.py`) | **Not run:** no `AI_API_KEY` on this machine |
+| Live storage check (`scripts/live_storage_check.py`) | **Not run:** no `S3_*` credentials |
+| Render deployment, HTTPS | **Not run:** needs the Render account |
+
+Not re-run on 2026-11-10 (last run 2026-11-09 on `32ffbdd`, before the analysis page was
+restored): `prodcheck.py` 13/13, browser timings, cross-engine workflow 5/5, axe and layout 20/20,
+NFR-725 restart trial 10/10, gitleaks, Mermaid render 14/14. CI repeats gitleaks and Mermaid.
 
 Evidence files:
 
