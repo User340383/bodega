@@ -1,6 +1,5 @@
-Browser NFR timings — scripts/browser_nfr.mjs, 50 trials each, final run 2026-11-09 01:04 on 32ffbdd (Tailwind build)
-against compose.prodcheck.yml (production nginx bundle + API on separate origins, 5,000 records, mock AI).
-Outliers noted honestly: guidance progress indicator max 1.208 s once (p95 0.598 s, limit 1.0 s at p95).
+Browser NFR timings — scripts/browser_nfr.mjs, 50 trials each, run 2026-11-11 on 3eeadc1 plus the uncommitted 2026-11-11 changes (migrations 007/008, skip link)
+against compose.prodcheck.yml (production nginx bundle + API on separate origins, 5,000 records, mock AI). All targets met at p95.
 
 {
   "conditions": {
@@ -12,41 +11,41 @@ Outliers noted honestly: guidance progress indicator max 1.208 s once (p95 0.598
   },
   "NFR-704 dashboard render, 5,000 records": {
     "trials": 50,
-    "p95": 1.323,
-    "median": 1.257,
-    "max": 1.353,
+    "p95": 1.328,
+    "median": 1.195,
+    "max": 1.413,
     "limit": 3,
     "passed": true
   },
   "NFR-702 50 draft rows after AI response": {
     "trials": 50,
-    "p95": 0.087,
-    "median": 0.075,
-    "max": 0.105,
+    "p95": 0.071,
+    "median": 0.063,
+    "max": 0.107,
     "limit": 8,
     "passed": true
   },
   "NFR-705 extraction progress indicator": {
     "trials": 50,
-    "p95": 0.068,
-    "median": 0.061,
-    "max": 0.117,
+    "p95": 0.096,
+    "median": 0.05,
+    "max": 0.108,
     "limit": 1,
     "passed": true
   },
   "NFR-705 guidance progress indicator": {
     "trials": 50,
-    "p95": 0.598,
-    "median": 0.446,
-    "max": 1.208,
+    "p95": 0.371,
+    "median": 0.355,
+    "max": 0.408,
     "limit": 1,
     "passed": true
   },
   "NFR-705 guidance outcome": {
     "trials": 50,
-    "p95": 0.659,
-    "median": 0.501,
-    "max": 1.274,
+    "p95": 0.413,
+    "median": 0.399,
+    "max": 0.446,
     "limit": 16,
     "passed": true
   },

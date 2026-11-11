@@ -64,7 +64,7 @@ def counts(sid):
 def test_migration_is_repeatable_and_relationships(db):
     migrate()
     with connect() as conn:
-        assert conn.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '006'  # Alembic head
+        assert conn.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '008'  # Alembic head
         assert conn.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('owners','submissions','sales_records','baseline_estimates')").fetchone()[0] == 4
     with pytest.raises(psycopg.errors.ForeignKeyViolation), connect() as conn:
         conn.execute('INSERT INTO submissions(id,owner_id,sale_date) VALUES (%s,%s,%s)', (uuid4(), uuid4(), date.today()))
@@ -496,7 +496,7 @@ def test_migration_upgrade_preserves_existing_records_and_nonblank_checks(db, mo
         with connect() as conn:
             # The pre-Alembic ledger is kept as it was; Alembic now records the head revision.
             assert conn.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 2
-            assert conn.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '006'
+            assert conn.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '008'
             # 005 backfills inputType and lifecycle timestamps without touching the sales rows.
             assert conn.execute('SELECT input_type, confirmed_at IS NOT NULL FROM submissions WHERE id=%s',
                                 (sid,)).fetchone() == ('TEXT', True)

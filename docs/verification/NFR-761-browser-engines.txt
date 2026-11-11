@@ -1,4 +1,4 @@
-NFR-761 / NFR-732 cross-engine run — final run 2026-11-09 on 32ffbdd (Tailwind build), compose.prodcheck.yml.
+NFR-761 / NFR-732 cross-engine run — run 2026-11-11 on 3eeadc1 plus the uncommitted 2026-11-11 changes (incl. the skip-link fix), compose.prodcheck.yml.
 Engines are Playwright's Linux builds; the device rows are emulations, not physical phones.
 
 {

@@ -70,7 +70,13 @@ def deployment_checks():
     status, _, _ = request(f"{API}/docs")
     check("API docs reachable (no secrets in OpenAPI)", status == 200)
     _, _, schema = request(f"{API}/openapi.json")
-    check("OpenAPI documents 400, not 422", b'"422"' not in schema)
+    # D-30: validation is 400 everywhere except confirming sales rows, which is 422.
+    paths = json.loads(schema)["paths"]
+    confirmation = {"/api/v1/confirm", "/api/v1/manual-entries"}
+    check("OpenAPI documents 400 for validation, 422 only for confirmation (D-30)",
+          all("422" not in op.get("responses", {}) for path, ops in paths.items() if path not in confirmation
+              for op in ops.values())
+          and all("422" in paths[path]["post"]["responses"] for path in confirmation))
 
 
 def load_records(total=5000, days=28, items=100):
@@ -97,7 +103,7 @@ def load_records(total=5000, days=28, items=100):
                     "-v", "ON_ERROR_STOP=1", "-U", "bodega", "-d", "bodega"], input=script, text=True, check=True,
                    capture_output=True)
     _, _, body = request(f"{API}/api/v1/sales?start={today - timedelta(days=days)}&end={today}", headers=AUTH)
-    return len(json.loads(body)["records"])
+    return json.loads(body)["total"]  # GET /sales pages its records (D-32); total counts the range.
 
 
 def concurrent(fn):

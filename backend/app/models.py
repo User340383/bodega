@@ -1,6 +1,6 @@
 """SQLAlchemy models of the Bodega schema (M3 5.1 / 7.1-7.2, docs/DATA_DICTIONARY.md).
 
-These declare the tables that Alembic migrations 001-006 create. tests/test_models.py compares
+These declare the tables that Alembic migrations 001-008 create. tests/test_models.py compares
 them with a freshly migrated database (Alembic compare_metadata), so model and schema cannot
 drift apart. Business rules that live in PostgreSQL (CHECK constraints, the Diagram 4 lifecycle
 trigger, deferred consistency triggers) stay in the migrations, where they are enforced for every

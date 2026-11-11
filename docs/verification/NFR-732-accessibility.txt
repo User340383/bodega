@@ -1,0 +1,11 @@
+NFR-732 accessibility and layout — scripts/browser_a11y.mjs, run 2026-11-11 against compose.prodcheck.yml (5,000 records).
+Edge, axe-core 4.10.1 (WCAG 2.0/2.1 A and AA); /login at 1280 px plus /capture, /drafts, /history, /analysis at 360/768/1280/1920 px.
+The first run found the focused skip link at 107x24 px; fixed (D-37) and rerun:
+
+{
+  "browser": "Microsoft Edge (Chromium)",
+  "axe": "@axe-core/playwright 4.10.1, WCAG 2.0/2.1 A and AA",
+  "combinations": 17,
+  "passed": 17,
+  "failed": []
+}

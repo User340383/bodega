@@ -35,7 +35,7 @@ section. Status letters are defined above. Decisions are in `docs/INTEGRATION_DE
 | Render deployment configuration | `render.yaml`; deploy job posts the Render hooks only after every check passes on `main` | Production images build; frontend image serves `/capture`, `config.js` and HSTS | **B** for the live deployment: needs the Render account, deploy-hook secrets and a database plan |
 | GitHub Actions runs the automated suites on every pull request | `.github/workflows/ci.yml` on every PR to `main`: Backend Tests, HTTP Smoke Test, Frontend Tests, Lint and Build, Lint and Secret Scan, Production Images | PR #7 checks green before this review; all jobs' commands re-run locally (section 4) | V. The new HTTP Smoke Test job has not run on GitHub yet |
 | Branch protection requiring peer reviews | Ruleset "Protect main branch" (active): pull request with 1 approving review, stale approvals dismissed, threads resolved, 3 required checks, no force push or deletion | Read with `gh api repos/User340383/bodega/rulesets/26400400` | V. Open: add the two newer jobs to the required checks (repository setting) |
-| React application shell, navigation routing, global API client | `frontend/src/App.jsx`, `layout/AppLayout.jsx`, `auth/*`, `api/client.js`, pages for `/login`, `/capture`, `/review/:id`, `/drafts`, `/history`, `/analysis` | `App.test.jsx`, `api/client.test.js` | V |
+| React application shell, navigation routing, global API client | `frontend/src/App.jsx`, `layout/AppLayout.jsx`, `auth/*`, `api/client.js`, pages for `/login`, `/capture`, `/review/:id`, `/drafts`, `/history`, `/analysis` | `App.test.jsx`, `api/client.test.js`; `scripts/browser_a11y.mjs` 17/17 (skip link fixed, D-37) | V |
 
 ### José Javier Otazu — AI ingestion, security QA, capture UI
 
@@ -46,7 +46,7 @@ section. Status letters are defined above. Decisions are in `docs/INTEGRATION_DE
 | Pillow EXIF metadata stripping | `privacy.sanitize_image`: orientation applied, pixels re-encoded as JPEG q85, long edge 2,048 px | `test_privacy.py`: EXIF/GPS absent from what is stored and sent | V |
 | Regex contact masking | `privacy.mask_text` (M3 9.5 pattern, D-20, D-28), applied before storage, before the AI call and to AI output | `test_masking.py` (50+ cases), `test_integration_regressions.py` (prices of 7 digits stay intact) | V |
 | 30-second timeout and retry for the VisionModel call | 30 s per attempt, one retry after 1 s for timeout/429/5xx/network/invalid schema, then `AI_UNAVAILABLE` | `test_ingestion.py`, `test_resilience.py` (20 forced timeouts) | V |
-| Security QA: unit tests proving EXIF and PII are stripped before AI processing | `test_privacy.py`, `test_masking.py`, `test_ingestion.py` (model and storage receive only sanitized or masked input) | Part of the 646-test run | V |
+| Security QA: unit tests proving EXIF and PII are stripped before AI processing | `test_privacy.py`, `test_masking.py`, `test_ingestion.py` (model and storage receive only sanitized or masked input) | Part of the 648-test run | V |
 | Capture UI: photo upload, loading state, manual-entry fallback form | `components/SalesCapture.jsx`, `ManualEntry.jsx`, `captureRules.js`, `pages/CapturePage.jsx` | `SalesCapture.test.jsx`, `ManualEntry.test.jsx` | V |
 
 ### Diushen Cabrera — analysis, guidance, integration tests, dashboard
@@ -55,16 +55,16 @@ section. Status letters are defined above. Decisions are in `docs/INTEGRATION_DE
 |---|---|---|---|
 | `GET /api/v1/analysis` with pandas 7-day moving averages and trend classification | `analysis.BaselineAnalyzer` (M3 5.5: latest 7 logged days in 28, trend over 14, suggested stock) | `test_analysis_math.py`, `test_insights_api.py`, `test_integration_regressions.py`, smoke (4.0 per logged day, 28) | V. Restored on 2026-11-10 (D-26 withdrawn) |
 | `POST /api/v1/guidance` with grounding checks; no unsupported claims returned | `guidance.GuidanceEngine`, `grounding.check_grounding` (M3 9.6 rules 1–7), Standard advice fallback, 409 with fewer than 7 logged days | `test_grounding.py` (one failing case per rule), `test_llm_provider.py`, `test_readability.py` | V\* (mock and fake client). **B** for real Claude wording |
-| Integration tests using MockVisionModel and MockLLMService | `tests/mock_vision.py`, `test_vision_output_to_guidance.py` (draft → confirm → analysis → guidance) | Part of the 646-test run | V |
-| Results dashboard: baseline estimates, trend directions (UP/DOWN/STABLE), plain-text restocking alerts | `components/ResultsDashboard.jsx`, `SalesTrendChart.jsx`, `pages/AnalysisPage.jsx` | `ResultsDashboard.test.jsx` | V. Restored on 2026-11-10 |
+| Integration tests using MockVisionModel and MockLLMService | `tests/mock_vision.py`, `test_vision_output_to_guidance.py` (draft → confirm → analysis → guidance) | Part of the 648-test run | V |
+| Results dashboard: baseline estimates, trend directions (UP/DOWN/STABLE), plain-text restocking alerts | `components/ResultsDashboard.jsx`, `SalesTrendChart.jsx`, `pages/AnalysisPage.jsx` | `ResultsDashboard.test.jsx`; Edge render of 100 item cards at 5,000 records p95 1.328 s (NFR-704); 5/5 engines; axe 0 violations at 4 widths | V. Restored on 2026-11-10 |
 
 ### Gabriel Marte — data and state, database tests, draft review and history
 
 | WorkDivision deliverable | Implementation | Test evidence | Status and blockers |
 |---|---|---|---|
-| PostgreSQL schema: OWNERS, SUBMISSIONS, SALES_RECORDS, BASELINE_ESTIMATES | `backend/migrations/001`–`006` applied by Alembic revisions 001–006; `app/models.py` | `test_database.py`, `test_models.py`; `alembic current` = `006 (head)` on a fresh database | V |
+| PostgreSQL schema: OWNERS, SUBMISSIONS, SALES_RECORDS, BASELINE_ESTIMATES | `backend/migrations/001`–`008` applied by Alembic revisions 001–008 (007 reserved, 008 removes the withdrawn draft, D-36); `app/models.py` | `test_database.py`, `test_models.py` (models equal the migrated schema; a draft-007 database upgrades with its data unchanged); `alembic current` = `008 (head)` on a fresh database and on the upgraded local database | V |
 | `POST /api/v1/confirm`: transactional save and status update | `repository.save_sales_records`: row lock, all rows and CONFIRMED in one transaction, idempotent repeat | `test_database.py`, `test_final_contract.py`, smoke (201 then 200 with the same IDs) | V. Open decision D-30 (422 or 400 for invalid rows) |
-| Database tests: transactions roll back on failure; duplicate confirmations are blocked | `test_database.py` (partial insert rolls back, concurrent and repeated confirmation), NFR-725 restart trial | Part of the 646-test run | V |
+| Database tests: transactions roll back on failure; duplicate confirmations are blocked | `test_database.py` (partial insert rolls back, concurrent and repeated confirmation), NFR-725 restart trial | Part of the 648-test run | V |
 | Interactive Draft Review table with highlighted fields | `components/DraftReview.jsx`, `draftRules.js`, `pages/ReviewPage.jsx`, `DraftsPage.jsx` | `SalesReview.test.jsx`, `DraftPages.test.jsx` | V |
 | Confirmed Sales History ledger | `components/SalesHistory.jsx`, `GET /api/v1/sales` | `SalesReview.test.jsx`, `test_final_contract.py`, `test_integration_regressions.py` (range and paging) | V |
 
@@ -192,26 +192,31 @@ All timings follow the SRS 5 rule: at least 50 trials, the 95th percentile, and 
 
 ## 4. Verification run on this branch
 
-Run on 2026-11-10 on the working tree of `work/srs-completion` (commit recorded in the pull
-request), in isolated Compose projects with temporary databases and synthetic data only:
+Run on 2026-11-11 on `3eeadc1` plus the uncommitted 2026-11-11 changes (migrations 007/008, skip
+link, check scripts; committed afterwards as recorded in `git log`), in isolated Compose projects
+with temporary databases and synthetic data only, except the local-database upgrade, which used
+the developer's own local database after a backup:
 
-| Check | Result |
-|---|---|
-| Backend pytest against disposable PostgreSQL 16 | **646 passed, 1 skipped**, 0 failed. The skip is the Dockerfile guard, which runs as a CI step. |
-| Migrations | `alembic upgrade head` on an empty database, and again as a no-op; `alembic current` = `006 (head)` |
-| Frontend ESLint, Vitest, Vite build | Lint clean; **132 passed** (9 files); build OK |
-| Ruff 0.17.4 (`ruff check backend`) | 0 findings |
-| HTTP smoke test (PostgreSQL, MinIO, SPA proxy, two backends) | PASS |
-| Production images | Backend and frontend images build; the frontend image serves `/capture`, `config.js` and HSTS |
-| One-command local stack | `docker compose up -d --build --wait` on empty volumes; extract, analysis and guidance answered over HTTP |
-| SQL seed script | Applied twice with `psql`; analysis READY with the documented figures |
-| Live Claude check (`scripts/live_ai_check.py`) | **Not run:** no `AI_API_KEY` on this machine |
-| Live storage check (`scripts/live_storage_check.py`) | **Not run:** no `S3_*` credentials |
-| Render deployment, HTTPS | **Not run:** needs the Render account |
+| Check | Command | Result |
+|---|---|---|
+| Backend pytest, disposable PostgreSQL 16 | `docker compose -f compose.test.yml run --rm --build backend-tests` | **648 passed, 1 skipped**, 0 failed (the skip is the Dockerfile guard, a CI step) |
+| Frontend ESLint, Vitest, Vite build | `docker compose -f compose.test.yml run --rm --build --no-deps frontend-checks` | lint clean; **132 passed** (9 files); build OK |
+| Ruff 0.17.4 | `ruff check backend` (python:3.12-slim) | 0 findings |
+| Migrations, fresh database | backend start on empty PostgreSQL (prodcheck, smoke, tests) | `alembic current` = `008 (head)`; no draft-007 columns |
+| Migrations, existing local database (was `007`) | `pg_dump` backup, restore into a throwaway PostgreSQL, `python -m app.database` twice; then `docker compose up -d --build --wait` on the real volume and two backend restarts | `007 → 008`; 2 submissions and 1 sales record; `md5` of all `submissions` and `sales_records` columns identical before, after and after each restart |
+| HTTP smoke (PostgreSQL, MinIO, SPA proxy, two backends) | `compose.test.yml --profile smoke` + `http-smoke` | PASS |
+| Production check | `docker compose -f compose.prodcheck.yml up -d --build --wait`; `python scripts/prodcheck.py` | **13/13**; NFR-701 p95 0.018 s; NFR-703 p95 2.396 s at 5,000 records (limit 3.0 s). Two checks in the script were outdated by D-30/D-32 and were updated |
+| Browser timings, Edge, 4G, 4× CPU, 50 trials | `node scripts/browser_nfr.mjs` | all pass: NFR-704 p95 1.328 s (≤ 3), NFR-702 0.071 s (≤ 8), NFR-705 indicators 0.096 / 0.371 s (≤ 1), guidance outcome 0.413 s (≤ 16); 0 page errors |
+| Accessibility and layout, Edge + axe-core 4.10.1 | `node scripts/browser_a11y.mjs` | **17/17** (login + 4 pages × 360/768/1280/1920 px): 0 WCAG 2.0/2.1 A/AA violations, no overflow, text ≥ 16 px, targets ≥ 44 px. First run found the focused skip link at 107 × 24 px; fixed (D-37) |
+| Cross-engine workflow | `scripts/browser_engines.mjs` in `mcr.microsoft.com/playwright:v1.49.1-noble` | **5/5** (Chromium, Firefox, WebKit, Pixel 7 and iPhone 14 emulation) |
+| NFR-725 restart trial | `python scripts/nfr725_restart_trial.py` | **10/10**, 0 lost confirmed records |
+| Production images | `docker build` backend and frontend; run the frontend image | both build; `/capture`, `config.js` and HSTS served |
+| Secret scan | gitleaks 8.21.2 over the history and the working tree | no leaks |
+| Live Claude (`scripts/live_ai_check.py`) | — | **Not run:** no `AI_API_KEY` (shell, Windows user/machine environment, `.env` files) |
+| Live R2 (`scripts/live_storage_check.py`) | — | **Not run:** no `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` |
+| Render deployment, HTTPS | — | **Not run:** no Render account access here. GitHub holds `RENDER_DEPLOY_HOOK_BACKEND/FRONTEND`, usable only by the CI deploy job on `main` |
 
-Not re-run on 2026-11-10 (last run 2026-11-09 on `32ffbdd`, before the analysis page was
-restored): `prodcheck.py` 13/13, browser timings, cross-engine workflow 5/5, axe and layout 20/20,
-NFR-725 restart trial 10/10, gitleaks, Mermaid render 14/14. CI repeats gitleaks and Mermaid.
+Not re-run: the Mermaid render (CI runs it on every pull request).
 
 Evidence files:
 
@@ -220,3 +225,4 @@ Evidence files:
 | `docs/verification/NFR-725-restart-trial.txt` | The 10 forced-restart trials |
 | `docs/verification/NFR-70x-browser-timings.txt` | 4G browser timings, 50 trials |
 | `docs/verification/NFR-761-browser-engines.txt` | Workflow in 3 engines and 2 device emulations |
+| `docs/verification/NFR-732-accessibility.txt` | axe and layout results per page and width |

@@ -356,6 +356,7 @@ The final Milestone 3 (October 23) supersedes parts of this report. Changes on t
 Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
 
 - **Deliverables complete locally:** the four-table schema (Alembic head `006`), transactional and idempotent `POST /confirm`, the rollback and duplicate-confirmation tests, the Draft Review table and the Sales History ledger.
-- **Withdrawn:** migration 007 and the 24-hour input deadline (D-27) and the retry transition (D-29). Retention is M3 7.4 again: `draftPayload` cleared on confirmation, input kept 30 days. A local development database that already applied the unreleased 007 must be recreated (`docker compose down -v`).
+- **Withdrawn:** the draft migration 007, the 24-hour input deadline (D-27) and the retry transition (D-29). Retention is M3 7.4 again: `draftPayload` cleared on confirmation, input kept 30 days.
+- **Upgrade path (D-36, 2026-11-11):** a database that ran the draft 007 upgrades on the next start through `007_reserved` and `008_remove_unreleased_007`, keeping every submission, draft and sales record. Head is `008`. Applied to the local development database after a `pg_dump` backup (`bodega-db-backups/bodega-latest_rev007_2026-11-10.dump` and `.sql`, beside the checkouts); row checksums of `submissions` and `sales_records` were identical before and after, and two further restarts changed nothing.
 - **Added:** `backend/seeds/synthetic_sales.sql`, the SQL seed script WorkDivision's execution steps ask for (D-34); `/sales` paging (D-32); confirmation errors carry field paths that the review table shows on the row.
 - **Open:** 422 or 400 for invalid confirmation rows (D-30).
