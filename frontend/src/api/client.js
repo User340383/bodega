@@ -30,9 +30,9 @@ const STATUS_MESSAGES = {
   504: 'The server took too long to answer. Please try again.',
 }
 
-// The backend sends {error: {code, message, fields}} on every error (M3 4.2). Validation is 400,
-// except confirming sales rows (/confirm, /manual-entries), which is 422 (D-30); both are VALIDATION_ERROR.
-const CODES = { 400: 'VALIDATION_ERROR', 401: 'UNAUTHORIZED', 404: 'NOT_FOUND', 409: 'INVALID_STATE', 422: 'VALIDATION_ERROR', 429: 'RATE_LIMITED' }
+// The backend sends {error: {code, message, fields}} on every error (M3 4.2); every validation
+// error, including /confirm and /manual-entries, is 400 VALIDATION_ERROR (D-30).
+const CODES = { 400: 'VALIDATION_ERROR', 401: 'UNAUTHORIZED', 404: 'NOT_FOUND', 409: 'INVALID_STATE', 429: 'RATE_LIMITED' }
 
 function fieldName(loc) {
   // FastAPI locations look like ["body", "lines", 0, "quantity"]; drop the request part.

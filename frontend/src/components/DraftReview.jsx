@@ -16,7 +16,7 @@ export default function DraftReview({ draft, request, onConfirmed }) {
   const [rows, setRows] = useState(() => reviewRows(draft))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  // error.fields from a 422 (D-30), keyed like "lines.0.quantity": shown on that row and field.
+  // error.fields from a 400 (M3 4.2), keyed like "lines.0.quantity": shown on that row and field.
   const [serverFields, setServerFields] = useState({})
   const [result, setResult] = useState(null)
   const status = draft.status

@@ -156,10 +156,10 @@ def get_submission(submission_id):
 
 
 class ConfirmationError(HTTPException):
-    """Confirmation validation (HTTP 422, envelope code VALIDATION_ERROR) with field locations."""
+    """Confirmation validation (HTTP 400, M3 4.2; envelope code VALIDATION_ERROR) with field locations."""
 
     def __init__(self, message, loc):
-        super().__init__(422, detail=[{"loc": ["body", *loc], "msg": message, "type": "value_error"}])
+        super().__init__(400, detail=[{"loc": ["body", *loc], "msg": message, "type": "value_error"}])
 
 
 def _same_value(left, right, field):

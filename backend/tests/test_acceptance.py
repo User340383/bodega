@@ -109,8 +109,8 @@ def test_ac04_invalid_fields_block_confirmation(client, changes):
     repository.update_status(sid, 'AI_UNAVAILABLE')
     row = {'itemName': 'Bread', 'quantity': '1', 'unitPrice': '0', **changes}
     response = client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': [row]})
-    assert response.status_code == 422 and response.json()['error']['fields']
-    assert client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': []}).status_code == 422
+    assert response.status_code == 400 and response.json()['error']['fields']
+    assert client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': []}).status_code == 400
     ok = client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': [
         {'itemName': 'Bread', 'quantity': '1', 'unitPrice': '0'}]})
     assert ok.status_code == 201  # Nonblank item, quantity 1, price 0 passes.
@@ -137,7 +137,7 @@ def test_ac14_high_confidence_prefilled_and_uncertain_value_requires_verificatio
     assert (bread['quantity'], bread['unitPrice']) == ('3', '2')
     base = {'draftLineId': bread['lineId'], 'itemName': 'bread', 'quantity': '3', 'unitPrice': '2.00'}
     blocked = client.post('/api/v1/confirm', json={'submissionId': draft['submissionId'], 'lines': [base]})
-    assert blocked.status_code == 422  # Not verified.
+    assert blocked.status_code == 400  # Not verified.
     saved = client.post('/api/v1/confirm', json={'submissionId': draft['submissionId'],
                                                 'lines': [{**base, 'verifiedFields': ['unitPrice']}]})
     assert saved.status_code == 201
@@ -155,7 +155,7 @@ def test_ac15_low_or_missing_confidence_and_band_boundaries(client):
     assert boundary['bands'] == {'quantity': 'HIGH', 'unitPrice': 'MEDIUM', 'itemName': 'LOW'}  # 0.85 / 0.60 / 0.59
     row = {'draftLineId': milk['lineId'], 'itemName': 'milk', 'quantity': '2', 'unitPrice': '1.50'}
     sid = draft['submissionId']
-    assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [row]}).status_code == 422  # Price unverified.
+    assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [row]}).status_code == 400  # Price unverified.
     assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [
         {**row, 'verifiedFields': ['unitPrice']}]}).status_code == 201
 
@@ -236,7 +236,7 @@ def test_ac18_manual_entry_saves_with_no_ai_request(client):
         ('bread', '4', '2.00')]
     zero = client.post('/api/v1/manual-entries', json={'submissionId': str(uuid4()), 'saleDate': DATE,
                                                       'lines': [{'itemName': 'bread', 'quantity': '0', 'unitPrice': '2.00'}]})
-    assert zero.status_code == 422 and 'lines.0.quantity' in zero.json()['error']['fields']
+    assert zero.status_code == 400 and 'lines.0.quantity' in zero.json()['error']['fields']
 
 
 def test_ac19_personal_data_is_removed_before_ai_processing(client):

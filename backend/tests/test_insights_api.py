@@ -238,7 +238,7 @@ def test_quantities_outside_the_final_limits_are_rejected_before_analysis(client
     repository.update_status(sid, 'AI_UNAVAILABLE')
     response = client.post('/api/v1/confirm', json={'submissionId': str(sid), 'lines': [
         {'itemName': 'Bread', 'quantity': quantity, 'unitPrice': '1.00'}]})
-    assert response.status_code == 422  # Confirmation validation (D-30).
+    assert response.status_code == 400  # Confirmation validation (D-30).
     assert response.json()['error']['code'] == 'VALIDATION_ERROR'
     assert analysis(client)['status'] == 'NO_DATA'
 

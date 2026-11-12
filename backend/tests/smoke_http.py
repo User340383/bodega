@@ -2,7 +2,7 @@
 
 Runs against real PostgreSQL and real S3 (MinIO), with synthetic data only:
   A. AI outage, through the SPA's Vite proxy (API_URL; backend without an AI provider):
-     validation envelope (400 extraction, 422 confirmation), markup rejection, text and photo
+     validation envelope (400 for every invalid request, M3 4.2), markup rejection, text and photo
      capture falling back to manual entry, confirmation idempotency, stored input kept after
      confirmation (M3 7.4) and removed from S3 on discard, standalone manual entry, pending
      drafts, history range and pagination, request IDs, auth.
@@ -65,7 +65,7 @@ with httpx.Client(base_url=os.environ['API_URL'], headers=AUTH, timeout=90) as w
     assert invalid.headers['x-request-id']
     assert web.post('/api/v1/extract', data={'saleDate': d2, 'text': '<script>alert(1)</script>'}).status_code == 400
     bad_confirm = web.post('/api/v1/confirm', json={'submissionId': 'bad', 'lines': []})
-    assert bad_confirm.status_code == 422 and bad_confirm.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert bad_confirm.status_code == 400 and bad_confirm.json()['error']['code'] == 'VALIDATION_ERROR'
 
     text = web.post('/api/v1/extract', data={'saleDate': d2, 'text': 'Bread 3\ncall 809-555-1234 or a@b.do'}).json()
     assert text['status'] == 'AI_UNAVAILABLE' and text['manualEntry'] is True
@@ -104,7 +104,7 @@ with httpx.Client(base_url=os.environ['API_URL'], headers=AUTH, timeout=90) as w
     assert web.post('/api/v1/manual-entries', json=manual).json()['recordIds'] == created.json()['recordIds']
     bad_manual = web.post('/api/v1/manual-entries', json={**manual, 'submissionId': str(uuid.uuid4()),
                                                           'lines': [{'itemName': 'x', 'quantity': '1.234', 'unitPrice': 1}]})
-    assert bad_manual.status_code == 422 and 'lines.0.quantity' in bad_manual.json()['error']['fields']
+    assert bad_manual.status_code == 400 and 'lines.0.quantity' in bad_manual.json()['error']['fields']
 
     saved = numbers(web.get('/api/v1/sales'))['records']
     rows = [row for row in saved if row['submissionId'] == sid]
@@ -156,7 +156,7 @@ with httpx.Client(base_url=os.environ['API_URL'], headers=AUTH, timeout=90) as w
     assert web.get('/api/v1/sales').json()['records'] == [] and web.get('/api/v1/submissions').json() == []
     assert web.get('/api/v1/analysis').json()['status'] == 'NO_DATA'
 
-print('PASS: SPA proxy, envelope (400/422), markup rejection, AI-outage fallback, masked text, confirmation '
+print('PASS: SPA proxy, envelope (400 incl. confirm and manual entry), markup rejection, AI-outage fallback, masked text, confirmation '
       'idempotency, S3 photo kept after confirm and removed on discard, manual entry during the outage, pending '
       'drafts, history range and pagination, auth; AI path capture -> review -> confirm -> history -> analysis '
       '(7-logged-day average 4.0, suggested stock 28) -> guidance; delete-all with typed DELETE')

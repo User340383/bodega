@@ -13,7 +13,7 @@ export default function ManualEntry({ request, onSaved, today = localToday }) {
   const [rows, setRows] = useState(() => [blankRow()])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [serverFields, setServerFields] = useState({})  // 422 error.fields, e.g. "lines.0.quantity"
+  const [serverFields, setServerFields] = useState({})  // 400 error.fields, e.g. "lines.0.quantity"
   const [saved, setSaved] = useState(null)
   const maxDate = today()
   const dateProblem = !saleDate ? 'Choose the sale date.' : saleDate > maxDate ? 'Sale date cannot be in the future.' : ''

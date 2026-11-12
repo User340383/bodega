@@ -41,7 +41,7 @@ def test_vision_draft_to_confirmation_analysis_and_guidance(client):
 
         # Nothing counts until the owner confirms, and uncertain fields need verification.
         assert client.get('/api/v1/analysis').json()['loggedDays'] == position
-        assert client.post('/api/v1/confirm', json=confirm_body(submission_id, draft['lines'])).status_code == 422
+        assert client.post('/api/v1/confirm', json=confirm_body(submission_id, draft['lines'])).status_code == 400
 
         body = confirm_body(submission_id, draft['lines'], verifiedFields=['quantity'])
         first = client.post('/api/v1/confirm', json=body)

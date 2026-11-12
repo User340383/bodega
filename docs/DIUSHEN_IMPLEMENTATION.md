@@ -36,7 +36,7 @@ DOWN    when current × 10 < previous × 9
 
 **Worked example.** 14 consecutive logged dates; bread sells 2 on each of the first seven and 4 on each of the latest seven. Prior average 2, current average 4, trend `UP`, suggested quantity 28.
 
-**Default date.** Without `asOf`, the analysis uses "today" from an injectable clock (`app/clock.py`) in `APP_TIMEZONE`, defaulting to UTC when unset. A malformed date or a date in the future returns 422 from both endpoints. An invalid timezone setting returns 503.
+**Default date.** Without `asOf`, the analysis uses "today" from an injectable clock (`app/clock.py`) in `APP_TIMEZONE`, defaulting to UTC when unset. A malformed date or a date in the future returns 400 from both endpoints (M3 4.2). An invalid timezone setting returns 503.
 
 ## 2. How exactness is preserved
 

@@ -212,7 +212,7 @@ def test_unrounded_quantity_reaches_review_and_confirmation_enforces_the_rule(cl
                                                               'quantity': '1.234', 'unitPrice': '0.80',
                                                               'verifiedFields': ['quantity']}]}
     rejected = client.post('/api/v1/confirm', json=body)
-    assert rejected.status_code == 422 and 'lines.0.quantity' in rejected.json()['error']['fields']
+    assert rejected.status_code == 400 and 'lines.0.quantity' in rejected.json()['error']['fields']
     body['lines'][0]['quantity'] = '1.23'
     assert client.post('/api/v1/confirm', json=body).status_code == 201
 
@@ -224,8 +224,8 @@ def test_draft_line_ids_are_stable_across_reopening(client):
     assert first == [1, 2] == [line['lineId'] for line in client.get(f'/api/v1/submissions/{sid}').json()['lines']]
 
 
-# ---- Error contract (M3 4.2 envelope; status codes per D-30) ---------------------------------
-def test_confirmation_errors_are_422_with_field_paths_and_extraction_errors_are_400(client):
+# ---- Error contract (M3 4.2: envelope, and 400 for every validation error, D-30) ------------
+def test_confirmation_and_extraction_validation_errors_are_400_with_field_paths(client):
     use(MockVisionModel(canned=ExtractionResult(overallConfidence=0.9, lines=[ExtractedLine(
         itemName='Bread', quantity=Decimal('3'), unitPrice=Decimal('1.50'), itemNameConfidence=0.7,
         quantityConfidence=0.99, unitPriceConfidence=0.99)])))
@@ -234,7 +234,7 @@ def test_confirmation_errors_are_422_with_field_paths_and_extraction_errors_are_
     unverified = client.post('/api/v1/confirm', json={'submissionId': draft['submissionId'], 'lines': [
         {'draftLineId': line['lineId'], 'itemName': 'Bread', 'quantity': '3', 'unitPrice': '1.50'}]})
     # FR-208: the MEDIUM item name must be ticked or edited.
-    assert unverified.status_code == 422
+    assert unverified.status_code == 400
     assert unverified.json()['error']['fields'] == {'lines.0.itemName': 'Row 1: tick or correct this value.'}
     extract = client.post('/api/v1/extract', data={'saleDate': '2026-02-30', 'text': 'Bread 3'})
     assert extract.status_code == 400 and set(extract.json()['error']['fields']) == {'saleDate'}
@@ -339,7 +339,7 @@ def test_guidance_uses_the_requested_as_of_for_evidence(client):
 def test_quantities_outside_the_final_limits_are_rejected_before_analysis(client, quantity):
     response = client.post('/api/v1/manual-entries', json={'submissionId': str(uuid4()), 'saleDate': DAY, 'lines': [
         {'itemName': 'Bread', 'quantity': quantity, 'unitPrice': 1}]})
-    assert response.status_code == 422 and 'lines.0.quantity' in response.json()['error']['fields']
+    assert response.status_code == 400 and 'lines.0.quantity' in response.json()['error']['fields']
     assert client.get('/api/v1/analysis').json()['status'] == 'NO_DATA'
 
 
@@ -394,3 +394,134 @@ def test_sql_seed_script_is_repeatable_and_feeds_the_analysis(db):
     figures = {e.itemName: (e.currentAverageDisplay, e.trend, e.suggestedQty) for e in result.estimates}
     assert (result.status, result.loggedDays) == ('READY', 14)
     assert figures == {'Bread': ('4.0', 'UP', Decimal('28')), 'Milk': ('2.5', 'STABLE', Decimal('18'))}
+
+
+# ---- Team review: M3 4.2 lists 400 for invalid /confirm and /manual-entries requests (D-30) ----
+def _medium_draft(client):
+    """A readable draft whose item name is MEDIUM, so it must be ticked before confirmation."""
+    use(MockVisionModel(canned=ExtractionResult(overallConfidence=0.9, lines=[ExtractedLine(
+        itemName='Bread', quantity=Decimal('3'), unitPrice=Decimal('1.50'), itemNameConfidence=0.7,
+        quantityConfidence=0.99, unitPriceConfidence=0.99)])))
+    draft = client.post('/api/v1/extract', data={'saleDate': DAY, 'text': 'Bread 3 1.50'}).json()
+    assert draft['status'] == 'NEEDS_VERIFICATION', draft
+    return draft['submissionId'], draft['lines'][0]['lineId']
+
+
+def _draft_state(sid):
+    with connect() as conn:
+        return conn.execute('SELECT status, draft_payload::text, updated_at, confirmed_at FROM submissions WHERE id=%s',
+                            (sid,)).fetchone()
+
+
+def _valid_line(line_id, **changes):
+    return {'draftLineId': line_id, 'itemName': 'Bread', 'quantity': '3', 'unitPrice': '1.50',
+            'verifiedFields': ['itemName'], **changes}
+
+
+def _without(line, key):
+    return {k: v for k, v in line.items() if k != key}
+
+
+CONFIRM_INVALID = {
+    # FastAPI/Pydantic request validation
+    'submissionId not a UUID': (lambda sid, lid: {'submissionId': 'bad', 'lines': [_valid_line(lid)]}, 'submissionId'),
+    'no lines': (lambda sid, lid: {'submissionId': sid, 'lines': []}, 'lines'),
+    'more than 100 lines': (lambda sid, lid: {'submissionId': sid, 'lines': [
+        {'itemName': 'Bread', 'quantity': 1, 'unitPrice': 1, 'source': 'MANUAL'}] * 101}, 'lines'),
+    'quantity 0': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(lid, quantity='0')]}, 'lines.0.quantity'),
+    'quantity with 3 decimals': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(lid, quantity='1.234')]},
+                                 'lines.0.quantity'),
+    'negative price': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(lid, unitPrice='-1')]},
+                       'lines.0.unitPrice'),
+    'blank item name': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(lid, itemName='   ')]},
+                        'lines.0.itemName'),
+    'item name over 100 characters': (lambda sid, lid: {'submissionId': sid, 'lines': [
+        _valid_line(lid, itemName='x' * 101)]}, 'lines.0.itemName'),
+    'missing quantity': (lambda sid, lid: {'submissionId': sid, 'lines': [_without(_valid_line(lid), 'quantity')]},
+                         'lines.0.quantity'),
+    # Application-level validation in RecordRepository.confirmSubmission
+    'MEDIUM field not ticked': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(lid, verifiedFields=[])]},
+                                'lines.0.itemName'),
+    'unknown draft line': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(999)]}, 'lines.0.draftLineId'),
+    'duplicate draft line': (lambda sid, lid: {'submissionId': sid, 'lines': [_valid_line(lid), _valid_line(lid)]},
+                             'lines.1.draftLineId'),
+    'AI row without its draft link': (lambda sid, lid: {'submissionId': sid, 'lines': [
+        {'itemName': 'Bread', 'quantity': 3, 'unitPrice': 1.5, 'source': 'AI_EXTRACTED'}]}, 'lines.0.source'),
+}
+
+
+@pytest.mark.parametrize('case', list(CONFIRM_INVALID))
+def test_invalid_confirm_requests_are_400_and_change_nothing(client, case):
+    sid, line_id = _medium_draft(client)
+    before = _draft_state(sid)
+    build, field = CONFIRM_INVALID[case]
+    response = client.post('/api/v1/confirm', json=build(sid, line_id))
+    assert response.status_code == 400, response.text
+    error = response.json()['error']
+    assert error['code'] == 'VALIDATION_ERROR' and error['message'] and field in error['fields'], error
+    assert _draft_state(sid) == before  # Status, draft and timestamps unchanged.
+    assert count('sales_records') == 0
+    # The same draft still confirms once the request is valid.
+    assert client.post('/api/v1/confirm', json={'submissionId': sid, 'lines': [_valid_line(line_id)]}).status_code == 201
+
+
+MANUAL_INVALID = {
+    'submissionId not a UUID': (lambda: {'submissionId': 'bad'}, 'submissionId'),
+    'sale date in the future': (lambda: {'saleDate': (AS_OF + timedelta(days=1)).isoformat()}, 'saleDate'),
+    'sale date more than 365 days ago': (lambda: {'saleDate': (AS_OF - timedelta(days=366)).isoformat()}, 'saleDate'),
+    'sale date not a date': (lambda: {'saleDate': '2026-02-30'}, 'saleDate'),
+    'no lines': (lambda: {'lines': []}, 'lines'),
+    'quantity above 99,999.99': (lambda: {'lines': [{'itemName': 'Rice', 'quantity': '100000', 'unitPrice': 1}]},
+                                 'lines.0.quantity'),
+    'price with 3 decimals': (lambda: {'lines': [{'itemName': 'Rice', 'quantity': 1, 'unitPrice': '0.805'}]},
+                              'lines.0.unitPrice'),
+    'missing item name': (lambda: {'lines': [{'quantity': 1, 'unitPrice': 1}]}, 'lines.0.itemName'),
+}
+
+
+@pytest.mark.parametrize('case', list(MANUAL_INVALID))
+def test_invalid_manual_entries_are_400_and_create_nothing(client, case):
+    manual(client, AS_OF - timedelta(days=1))  # Existing history must be untouched.
+    with connect() as conn:
+        before = conn.execute('SELECT count(*), max(updated_at) FROM submissions').fetchone()
+    sid = str(uuid4())
+    changes, field = MANUAL_INVALID[case]
+    body = {'submissionId': sid, 'saleDate': DAY, 'lines': [{'itemName': 'Rice', 'quantity': 1, 'unitPrice': 1}],
+            **changes()}
+    response = client.post('/api/v1/manual-entries', json=body)
+    assert response.status_code == 400, response.text
+    error = response.json()['error']
+    assert error['code'] == 'VALIDATION_ERROR' and error['message'] and field in error['fields'], error
+    with connect() as conn:
+        assert conn.execute('SELECT count(*), max(updated_at) FROM submissions').fetchone() == before
+    assert count('sales_records') == 1
+    # The client-generated ID was not consumed: the corrected form saves under it.
+    fixed = {'submissionId': sid, 'saleDate': DAY, 'lines': [{'itemName': 'Rice', 'quantity': 1, 'unitPrice': 1}]}
+    assert client.post('/api/v1/manual-entries', json=fixed).status_code == 201
+
+
+def test_other_confirm_and_manual_entry_statuses_keep_their_m3_meanings(client):
+    sid, line_id = _medium_draft(client)
+    body = {'submissionId': sid, 'lines': [_valid_line(line_id)]}
+    # 401 without a valid access code, before any validation (NFR-718).
+    for path, payload in (('/api/v1/confirm', {'submissionId': 'bad', 'lines': []}),
+                          ('/api/v1/manual-entries', {'submissionId': 'bad'})):
+        anonymous = client.post(path, json=payload, headers={'Authorization': 'Bearer wrong-code'})
+        assert anonymous.status_code == 401 and anonymous.json()['error']['code'] == 'UNAUTHORIZED'
+    # 404 for an unknown submission; 409 while a submission is still being read.
+    missing = client.post('/api/v1/confirm', json={**body, 'submissionId': str(uuid4())})
+    assert missing.status_code == 404 and missing.json()['error']['code'] == 'NOT_FOUND'
+    busy = repository.create_submission(AS_OF, input_type='TEXT', masked_text='Milk 2')
+    repository.update_status(busy, 'CLASSIFYING')
+    conflict = client.post('/api/v1/confirm', json={'submissionId': str(busy), 'lines': [
+        {'itemName': 'Milk', 'quantity': 2, 'unitPrice': 1, 'source': 'MANUAL'}]})
+    assert conflict.status_code == 409 and conflict.json()['error']['code'] == 'INVALID_STATE'
+    # 201, then 200 with the same IDs on a repeat (idempotent).
+    first = client.post('/api/v1/confirm', json=body)
+    again = client.post('/api/v1/confirm', json=body)
+    assert (first.status_code, again.status_code) == (201, 200)
+    assert first.json()['recordIds'] == again.json()['recordIds']
+    # Manual entry: 409 when the ID belongs to a submission in another state.
+    clash = client.post('/api/v1/manual-entries', json={'submissionId': str(busy), 'saleDate': DAY, 'lines': [
+        {'itemName': 'Milk', 'quantity': 2, 'unitPrice': 1}]})
+    assert clash.status_code == 409 and clash.json()['error']['code'] == 'INVALID_STATE'

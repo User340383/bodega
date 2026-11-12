@@ -138,7 +138,7 @@ def test_manual_entry_creates_a_confirmed_manual_submission_once(client):
 def test_manual_entry_validation(client, changes, field):
     body = {'submissionId': str(uuid4()), 'saleDate': AS_OF.isoformat(), 'lines': [line()], **changes}
     response = client.post('/api/v1/manual-entries', json=body)
-    assert response.status_code == 422, response.text
+    assert response.status_code == 400, response.text
     assert field in response.json()['error']['fields']
     with connect() as conn:
         assert conn.execute('SELECT count(*) FROM submissions').fetchone()[0] == 0

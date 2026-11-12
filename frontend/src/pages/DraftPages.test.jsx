@@ -69,10 +69,10 @@ describe('Review page discard', () => {
   })
 })
 
-describe('Confirmation errors (422, D-30)', () => {
+describe('Confirmation errors (400, M3 4.2)', () => {
   it('shows error.fields on the matching row and field, and clears them on edit', async () => {
     const error = Object.assign(new Error('Row 1: tick or correct this value.'), {
-      status: 422, code: 'VALIDATION_ERROR', fields: { 'lines.0.quantity': 'Row 1: tick or correct this value.' } })
+      status: 400, code: 'VALIDATION_ERROR', fields: { 'lines.0.quantity': 'Row 1: tick or correct this value.' } })
     const request = vi.fn().mockRejectedValue(error)
     const user = userEvent.setup()
     render(<DraftReview draft={readable} request={request} />)

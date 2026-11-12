@@ -6,10 +6,10 @@ Error body for every non-2xx response (M3 4.2):
 `detail` repeats FastAPI's original detail (string or [{loc, msg, type}]) for clients written
 before the envelope; it never contains submitted values. The SPA reads only `error`.
 
-Validation status codes (docs/INTEGRATION_DECISIONS.md D-30): extraction and every other request
-answer 400; confirmation of sales rows (POST /confirm and POST /manual-entries, which both save
-rows under the same FR-202-FR-204 rules) answers 422. Both carry code VALIDATION_ERROR and
-field paths such as "lines.0.quantity".
+Validation status (M3 4.2; docs/INTEGRATION_DECISIONS.md D-30): every invalid request answers 400
+with code VALIDATION_ERROR and field paths such as "lines.0.quantity", including POST /confirm and
+POST /manual-entries. That covers FastAPI/Pydantic request validation and the application's own
+checks. 401, 404, 409 and 500 keep their M3 4.2 meanings.
 """
 import asyncio
 import json
@@ -82,12 +82,9 @@ app.add_middleware(RequestLogMiddleware)
 
 # ---- Errors (M3 4.2 envelope, NFR-731 plain-English messages) ------------------------------
 ERROR_CODES = {400: "VALIDATION_ERROR", 401: "UNAUTHORIZED", 404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED",
-               409: "INVALID_STATE", 422: "VALIDATION_ERROR", 429: "RATE_LIMITED", 500: "DATABASE_ERROR",
-               503: "SERVICE_UNAVAILABLE"}
-CONFIRMATION_PATHS = frozenset({"/api/v1/confirm", "/api/v1/manual-entries"})
+               409: "INVALID_STATE", 429: "RATE_LIMITED", 500: "DATABASE_ERROR", 503: "SERVICE_UNAVAILABLE"}
 GENERIC_MESSAGES = {
     400: "Check the highlighted fields and try again.",
-    422: "Check the highlighted rows and try again. Nothing was saved.",
     401: "Your access code was not accepted. Please sign in again.",
     404: "We could not find that. It may have been deleted. Go back and try again.",
     409: "This cannot be changed right now. Refresh and try again.",
@@ -135,20 +132,17 @@ def _fields(details):
     return fields
 
 
-def _validation_status(request):
-    return 422 if request.url.path in CONFIRMATION_PATHS else 400
-
-
 @app.exception_handler(RequestValidationError)
 async def request_validation_error(request, exc):
     details = _validation_details(exc.errors())
     first = details[0]["msg"] if len(details) == 1 else None
-    return error_response(_validation_status(request), message=first, fields=_fields(details), detail=details)
+    return error_response(400, message=first, fields=_fields(details), detail=details)  # M3 4.2
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_error(request, exc):
-    status_code = exc.status_code
+    # M3 4.2 has no 422: any validation raised as 422 (FastAPI's default) is answered as 400.
+    status_code = 400 if exc.status_code == 422 else exc.status_code
     detail = exc.detail
     if isinstance(detail, list):
         return error_response(status_code, code=getattr(exc, "code", None), fields=_fields(detail), detail=detail,
@@ -456,7 +450,7 @@ def _delete_queued_images(storage, limit=100):
 def manual_entry(request: ManualEntryRequest, response: Response, _: None = Depends(require_owner_access),
                  clock: Clock = Depends(get_clock)):
     """Standalone manual entry (FR-104, SD-04): no AI request; the submission is created CONFIRMED."""
-    _check_sale_date(request.saleDate, clock, ["body", "saleDate"], status_code=422)
+    _check_sale_date(request.saleDate, clock, ["body", "saleDate"])
     ids, created = repository.create_manual_submission(request.submissionId, request.saleDate, request.lines)
     response.status_code = 201 if created else 200
     return {"submissionId": request.submissionId, "recordIds": ids, "created": created}
@@ -562,9 +556,7 @@ def _openapi_with_400_validation():
         return app.openapi_schema
     from fastapi.openapi.utils import get_openapi
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-    for route, path in schema.get("paths", {}).items():
-        if route in CONFIRMATION_PATHS:
-            continue  # Confirmation validation really is 422 (D-30).
+    for path in schema.get("paths", {}).values():
         for operation in path.values():
             responses = operation.get("responses", {})
             if "422" in responses:

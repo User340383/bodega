@@ -101,7 +101,7 @@ describe('errorFromResponse', () => {
 
   it('reads FastAPI string and list details', () => {
     expect(errorFromResponse(503, { detail: 'We could not save your photo. Please try again.' }).message).toBe('We could not save your photo. Please try again.')
-    const error = errorFromResponse(422, { detail: [
+    const error = errorFromResponse(400, { detail: [
       { loc: ['body', 'lines', 0, 'quantity'], msg: 'Input should be greater than 0' },
       { loc: ['body'], msg: 'Value error, Provide exactly one image file or text input.' },
     ] })
