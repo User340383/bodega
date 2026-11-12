@@ -7,12 +7,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY migrations ./migrations
+COPY seeds ./seeds
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 COPY tests ./tests
+COPY benchmarks ./benchmarks
 COPY pytest.ini ./pytest.ini
 
 ENV PORT=8000
+# Lets the alembic CLI import app/ (M3 8.5 "alembic upgrade head"); alembic.ini deliberately has no
+# prepend_sys_path, which would grow sys.path on every programmatic migration.
+ENV PYTHONPATH=/app
 EXPOSE 8000
 
-# Render injects PORT. Migrations run in the app lifespan before /health answers (M3 8.5).
-# --proxy-headers lets the access-code rate limit see the real client IP behind Render's proxy.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"$PORT\" --proxy-headers --forwarded-allow-ips='*'"]
+# Render injects PORT. `alembic upgrade head` runs in the app lifespan before /health answers (M3 8.5).
+# Proxy headers are NOT trusted wholesale: --forwarded-allow-ips='*' made the left-most,
+# client-controlled X-Forwarded-For entry the client address and let anyone bypass the
+# access-code rate limit. The limiter reads the entry Render appends (TRUSTED_PROXY_HOPS=1).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"$PORT\" --no-proxy-headers --no-access-log"]

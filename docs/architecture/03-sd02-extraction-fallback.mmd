@@ -1,0 +1,40 @@
+sequenceDiagram
+  autonumber
+  actor BusinessOwner
+  participant ReactSPA
+  participant SalesCaptureController
+  participant InferenceService
+  participant RecordRepository
+  participant VisionModel
+  BusinessOwner->>ReactSPA: Submit photo of sales log and sale date
+  ReactSPA->>SalesCaptureController: POST /api/v1/extract (file, saleDate)
+  Note over SalesCaptureController,RecordRepository: Validation, sanitizeImage, putObject and createSubmission (UPLOADED) exactly as SD-01 steps 4 to 10
+  SalesCaptureController->>InferenceService: extractFromImage(submissionId, sanitizedImage)
+  InferenceService->>RecordRepository: updateStatus(submissionId, CLASSIFYING)
+  InferenceService->>VisionModel: extractFromImage(image, prompt, timeout=30)
+  Note right of VisionModel: No valid response within 30 s
+  VisionModel-->>InferenceService: ProviderTimeoutError (attempt 1 of 2)
+  InferenceService->>InferenceService: wait 1 s
+  InferenceService->>VisionModel: extractFromImage(image, prompt, timeout=30) attempt 2
+  alt Attempt 2 succeeds
+    VisionModel-->>InferenceService: ExtractionResult
+    Note over InferenceService,RecordRepository: maskContacts, applyConfidenceBands and saveDraft (NEEDS_VERIFICATION or REJECTED) as SD-01 steps 15 to 17
+    InferenceService-->>SalesCaptureController: SalesDraft
+    SalesCaptureController-->>ReactSPA: 200 OK ExtractResponse
+
+    ReactSPA-->>BusinessOwner: Draft review continues as in SD-01
+  else Attempt 2 also fails
+    VisionModel-->>InferenceService: ProviderTimeoutError (attempt 2 of 2)
+    InferenceService->>RecordRepository: saveDraft(draft with status AI_UNAVAILABLE, no lines)
+    InferenceService-->>SalesCaptureController: SalesDraft (status AI_UNAVAILABLE)
+    SalesCaptureController-->>ReactSPA: 200 OK ExtractResponse (status AI_UNAVAILABLE, manualEntry true, imageUrl)
+    ReactSPA-->>BusinessOwner: "We could not read this right now" and empty form beside the photo
+    BusinessOwner->>ReactSPA: Type item names, quantities and unit prices
+    ReactSPA->>SalesCaptureController: POST /api/v1/confirm (submissionId, lines without draftLineId)
+    SalesCaptureController->>SalesCaptureController: validateLines(lines)
+    SalesCaptureController->>RecordRepository: confirmSubmission(ownerId, submissionId, lines)
+    RecordRepository->>RecordRepository: Insert rows with source MANUAL, set CONFIRMED, commit
+    RecordRepository-->>SalesCaptureController: ConfirmOutcome (recordIds)
+    SalesCaptureController-->>ReactSPA: 201 Created (recordIds)
+    ReactSPA-->>BusinessOwner: "Sales saved"
+  end

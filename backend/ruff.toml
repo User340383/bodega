@@ -1,0 +1,9 @@
+# Backend lint (M3 8.5 "ruff check"), run in CI by the Backend Tests job.
+target-version = "py312"
+line-length = 120
+
+[lint]
+# pycodestyle errors, pyflakes and flake8-bugbear.
+select = ["E4", "E7", "E9", "F", "B"]
+# FastAPI's Depends()/Query()/File() defaults are the framework's documented pattern.
+ignore = ["B008"]

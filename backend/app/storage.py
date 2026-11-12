@@ -5,6 +5,7 @@ S3_PUBLIC_ENDPOINT_URL lets signed URLs use a browser-reachable host (e.g. http:
 locally, where the backend itself reaches MinIO as http://minio:9000).
 """
 import os
+from datetime import datetime, timezone
 from uuid import uuid4
 
 SIGNED_URL_SECONDS = 300
@@ -56,19 +57,41 @@ class ObjectStorage:
         except Exception as exc:
             raise StorageError("could not sign URL") from exc
 
+    def get_object(self, key: str) -> bytes:
+        """The stored sanitized image (used by the storage check and tests)."""
+        try:
+            return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+        except Exception as exc:
+            raise StorageError("could not read object") from exc
+
     def delete_object(self, key: str) -> None:
+        # S3 deletes are idempotent: deleting a missing key succeeds, so a retried job is safe.
         try:
             self.client.delete_object(Bucket=self.bucket, Key=key)
         except Exception as exc:
             raise StorageError("could not delete object") from exc
 
+    def list_keys(self, prefix: str, older_than: datetime) -> list[str]:
+        """Keys under `prefix` last modified before `older_than` (orphan reconciliation)."""
+        try:
+            self._ensure_bucket()
+            keys = []
+            for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
+                keys += [item["Key"] for item in page.get("Contents", []) if item["LastModified"] < older_than]
+            return keys
+        except Exception as exc:
+            raise StorageError("could not list objects") from exc
+
 
 class InMemoryObjectStorage:
     """Test double with the same interface. `fail_puts` simulates an outage."""
 
-    def __init__(self, fail_puts: bool = False):
+    def __init__(self, fail_puts: bool = False, fail_deletes: bool = False, fail_gets: bool = False):
         self.objects: dict[str, tuple[bytes, str]] = {}
+        self.stored_at: dict[str, datetime] = {}
         self.fail_puts = fail_puts
+        self.fail_deletes = fail_deletes
+        self.fail_gets = fail_gets
         self.deleted: list[str] = []
 
     def put_object(self, data, content_type):
@@ -76,13 +99,25 @@ class InMemoryObjectStorage:
             raise StorageError("simulated outage")
         key = f"images/{uuid4()}.jpg"
         self.objects[key] = (data, content_type)
+        self.stored_at[key] = datetime.now(timezone.utc)
         return key
+
+    def get_object(self, key):
+        if self.fail_gets or key not in self.objects:
+            raise StorageError("simulated read failure")
+        return self.objects[key][0]
+
+    def list_keys(self, prefix, older_than):
+        return [key for key in self.objects if key.startswith(prefix) and self.stored_at[key] < older_than]
 
     def get_signed_url(self, key, expires_in=SIGNED_URL_SECONDS):
         return f"memory://{key}?expires={expires_in}"
 
     def delete_object(self, key):
+        if self.fail_deletes:
+            raise StorageError("simulated outage")
         self.objects.pop(key, None)
+        self.stored_at.pop(key, None)
         self.deleted.append(key)
 
 
@@ -95,8 +130,14 @@ class UnconfiguredObjectStorage:
     def get_signed_url(self, key, expires_in=SIGNED_URL_SECONDS):
         raise StorageError("object storage is not configured")
 
+    def get_object(self, key):
+        raise StorageError("object storage is not configured")
+
     def delete_object(self, key):
         raise StorageError("object storage is not configured")
+
+    def list_keys(self, prefix, older_than):
+        return []  # Nothing can have been stored.
 
 
 _storage = None

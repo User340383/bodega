@@ -59,16 +59,16 @@ def test_overall_confidence_threshold(overall, status):
     draft = apply_confidence_bands(result(line(), overall=overall), "IMAGE")
     assert draft["status"] == status
     if status == "REJECTED":
-        assert draft["payload"]["lines"] == [] and "could not read this photo" in draft["payload"]["message"]
+        assert draft["payload"]["lines"] == [] and draft["payload"]["message"].startswith("We could not read this photo")  # M3 9.4
 
 
 def test_all_null_lines_are_dropped_and_no_lines_is_rejected():
     empty = ExtractedLine(itemNameConfidence=0, quantityConfidence=0, unitPriceConfidence=0)
     assert apply_confidence_bands(result(empty, empty), "TEXT") == {
-        "status": "REJECTED", "payload": {"version": 1, "message": "No sales lines found.", "lines": []}}
+        "status": "REJECTED", "payload": {"version": 1, "message": "No sales lines found. Retake the photo or type the sales below.", "lines": []}}
     assert apply_confidence_bands(result(), "IMAGE")["status"] == "REJECTED"
     kept = apply_confidence_bands(result(empty, line(), empty, line("Milk")), "TEXT")["payload"]["lines"]
-    assert [(entry["lineId"], entry["itemName"]) for entry in kept] == [("1", "Bread"), ("2", "Milk")]
+    assert [(entry["lineId"], entry["itemName"]) for entry in kept] == [(1, "Bread"), (2, "Milk")]
 
 
 def test_every_readable_draft_needs_verification_even_when_all_high():
@@ -80,16 +80,35 @@ def test_contacts_in_ai_output_are_masked_before_storage():
     assert draft["payload"]["lines"][0]["itemName"] == "Ana [removed] [removed]"
 
 
+# Extraction never rounds or clears a number before review (audit: 1.234 became 1.23). A value
+# outside the approved rules (M3 7.2) is shown as read, never banded HIGH, and must be corrected:
+# review flags it and POST /confirm rejects it (tests/test_database.py, final limits).
 @pytest.mark.parametrize("qty,price,expect_qty,expect_price,qty_band", [
-    ("-1", "1.50", None, "1.50", "LOW"),             # negative quantity cleared
-    ("0", "1.50", None, "1.50", "LOW"),              # quantity must be > 0
-    ("100000", "1.50", None, "1.50", "LOW"),         # above 99,999.99
-    ("2.555", "0", "2.56", "0", "MEDIUM"),           # rounded half-up, so must be checked; price 0 allowed
-    ("2.50", "1.5", "2.50", "1.50", "HIGH"),
+    ("1.234", "2", "1.234", "2", "MEDIUM"),           # audit regression: three decimals kept as read
+    ("-1", "1.50", "-1", "1.50", "MEDIUM"),           # negative quantity kept, must be corrected
+    ("0", "1.50", "0", "1.50", "MEDIUM"),             # quantity must be > 0
+    ("100000", "1.50", "100000", "1.50", "MEDIUM"),   # above 99,999.99
+    ("2.555", "0", "2.555", "0", "MEDIUM"),           # not rounded; price 0 allowed
+    ("2.50", "1.5", "2.50", "1.5", "HIGH"),           # valid values unchanged, as written
+    ("3.00", "1.20", "3", "1.20", "HIGH"),            # only an all-zero fraction is dropped
 ])
-def test_out_of_range_values_are_cleared_and_rounding_forces_review(qty, price, expect_qty, expect_price, qty_band):
+def test_numbers_are_kept_as_read_and_rule_breaking_values_force_review(qty, price, expect_qty, expect_price, qty_band):
     first = apply_confidence_bands(result(line(qty=qty, price=price, qc=0.99)), "TEXT")["payload"]["lines"][0]
     assert (first["quantity"], first["unitPrice"], first["bands"]["quantity"]) == (expect_qty, expect_price, qty_band)
+
+
+def test_price_with_extra_decimals_is_kept_and_needs_review():
+    first = apply_confidence_bands(result(line(qty="2", price="0.555", qc=0.99)), "TEXT")["payload"]["lines"][0]
+    assert first["unitPrice"] == "0.555" and first["bands"]["unitPrice"] == "MEDIUM"
+
+
+def test_float_from_the_provider_json_reaches_review_unrounded():
+    """The real provider sends JSON numbers; the SDK gives floats. 1.234 must stay 1.234."""
+    parsed = parse_tool_input({"overallConfidence": 0.9, "lines": [{
+        "itemName": "Rice (lb)", "quantity": 1.234, "unitPrice": 0.8, "itemNameConfidence": 0.99,
+        "quantityConfidence": 0.99, "unitPriceConfidence": 0.99}]})
+    first = apply_confidence_bands(parsed, "TEXT")["payload"]["lines"][0]
+    assert (first["quantity"], first["unitPrice"], first["bands"]["quantity"]) == ("1.234", "0.8", "MEDIUM")
 
 
 def test_schema_invalid_tool_output_is_retryable():
@@ -106,7 +125,7 @@ def statuses(monkeypatch):
     """Record status writes instead of touching the database."""
     recorded = []
     monkeypatch.setattr(ingestion.repository, "update_status",
-                        lambda sid, status, draft_payload=None: recorded.append((status, draft_payload)))
+                        lambda sid, status, draft_payload=None, **_: recorded.append((status, draft_payload)))
     return recorded
 
 
@@ -242,7 +261,7 @@ def test_text_is_masked_before_storage_and_before_the_model(client, capture):
     assert PHONE not in masked_text and PHONE not in payload and EMAIL not in payload
 
     lines = {entry["itemName"]: entry for entry in body["lines"]}
-    assert lines["Bread"]["quantity"] == "3" and lines["Bread"]["unitPrice"] == "1.50"
+    assert lines["Bread"]["quantity"] == "3" and lines["Bread"]["unitPrice"] == "1.50"  # as typed
     assert lines["Milk"]["bands"]["unitPrice"] == "LOW" and lines["Milk"]["unitPrice"] is None
 
     # The reviewed draft confirms through Gabriel's transaction with AI provenance kept.
@@ -301,7 +320,7 @@ def test_ai_timeouts_fall_back_to_manual_entry_and_manual_rows_confirm(client, c
     assert response.status_code == 200
     body = response.json()
     assert (body["status"], body["manualEntry"], body["lines"]) == ("AI_UNAVAILABLE", True, [])
-    assert body["message"].startswith("We could not read this right now")
+    assert body["message"].startswith("We could not read this right now")  # M3 9.4
     assert len(capture["model"].calls) == 2
 
     confirm = client.post("/api/v1/confirm", json={"submissionId": body["submissionId"], "lines": [

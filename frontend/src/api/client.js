@@ -21,20 +21,22 @@ export function apiBaseUrl(config = globalThis.window?.__BODEGA_CONFIG__) {
 
 const STATUS_MESSAGES = {
   401: 'Your access code was not accepted. Please sign in again.',
-  404: 'We could not find that. It may have been deleted.',
+  404: 'We could not find that. It may have been deleted. Go back and try again.',
   409: 'This cannot be changed right now. Refresh and try again.',
   429: 'Too many wrong access codes. Wait 15 minutes and try again.',
   500: 'Something went wrong on our side. Please try again.',
   502: 'The server is starting up or unavailable. Please try again in a minute.',
-  503: 'The service is temporarily unavailable. Please try again.',
+  503: 'The service is not working right now. Please try again in a minute.',
   504: 'The server took too long to answer. Please try again.',
 }
 
+// The backend sends {error: {code, message, fields}} on every error (M3 4.2); every validation
+// error, including /confirm and /manual-entries, is 400 VALIDATION_ERROR (D-30).
 const CODES = { 400: 'VALIDATION_ERROR', 401: 'UNAUTHORIZED', 404: 'NOT_FOUND', 409: 'INVALID_STATE', 429: 'RATE_LIMITED' }
 
 function fieldName(loc) {
   // FastAPI locations look like ["body", "lines", 0, "quantity"]; drop the request part.
-  const path = (Array.isArray(loc) ? loc : []).filter(part => !['body', 'query', 'path', 'header'].includes(part))
+  const path = (Array.isArray(loc) ? loc : []).filter(part => !['body', 'query', 'path', 'header', 'form'].includes(part))
   return path.length ? path.join('.') : ''
 }
 

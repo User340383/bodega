@@ -31,6 +31,7 @@ services:
       S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       AI_API_KEY: ${AI_API_KEY:-}
       AI_EXTRACTION_MODEL: ${AI_EXTRACTION_MODEL:-claude-sonnet-5-5}
+      AI_GUIDANCE_MODEL: ${AI_GUIDANCE_MODEL:-claude-haiku-5-5}
       APP_ACCESS_CODE: local-development-code-123
       OWNER_ID: 00000000-0000-4000-8000-000000000001
       OWNER_DISPLAY_NAME: Local Owner

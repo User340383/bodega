@@ -1,12 +1,59 @@
-:root { font-family: system-ui, sans-serif; color: #24352e; background: #f4f6f2; font-synthesis: none; }
-body { margin: 0; }
-* { box-sizing: border-box; }
-#root { max-width: 1150px; margin: auto; padding: 1.5rem; }
-h1 { margin: 0; font-size: 2.5rem; }
-h2 { margin-top: 0; }
-input, button { font: inherit; }
-button, input { min-height: 44px; border-radius: 5px; border: 1px solid #82968a; padding: .5rem .7rem; }
-button { cursor: pointer; background: #235c43; color: white; margin: .3rem; }
-button:disabled { opacity: .55; cursor: default; }
-input { max-width: 100%; }
-button:focus-visible, input:focus-visible { outline: 3px solid #bb6c1d; outline-offset: 2px; }
+/* Tailwind CSS (M1 stack; M3 4.1 "React SPA ... Tailwind CSS", 4.3 "mobile-first, Tailwind
+   breakpoints sm/md/lg"). Design tokens live in @theme; component styles use @apply with
+   Tailwind utilities in their own files, which @reference this entry.
+   NFR-732: body text >= 16 px (text-base), touch targets >= 44 px (min-h-11). */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: system-ui, sans-serif;
+  --color-ink: #24352e;
+  --color-ink-muted: #5a6b62;
+  --color-muted: #4f6159;
+  --color-canvas: #f4f6f2;
+  --color-line: #d2ddd5;
+  --color-field: #82968a;
+  --color-brand: #235c43;
+  --color-brand-soft: #e3ebe5;
+  --color-focus: #bb6c1d;
+  --color-danger: #a02323;
+  --color-danger-soft: #fff7f7;
+  --color-warn-soft: #fff3ce;
+  --color-info-soft: #eef4f8;
+  --color-info: #2f6db5;
+  --color-ok-soft: #e9f5ec;
+  --color-ok: #2f8a4c;
+  --color-note: #fff8dc;
+  --color-series-sales: #3a9a78;
+  --color-series-average: #bb6c1d;
+}
+
+@layer base {
+  :root { @apply font-sans text-ink bg-canvas; font-synthesis: none; }
+  body { @apply m-0 text-base; }
+  #root { @apply mx-auto max-w-[1150px] p-3 md:p-6; }
+  /* Preflight removes browser heading sizes; restore a clear hierarchy. */
+  h1 { @apply m-0 text-[2.5rem] font-bold leading-tight; }
+  h2 { @apply mt-0 mb-3 text-2xl font-bold; }
+  h3 { @apply mt-4 mb-2 text-xl font-bold; }
+  h4 { @apply text-lg font-bold; }
+  p { @apply my-3; }
+  input, button, textarea, select { @apply text-base; font: inherit; }
+  button, input { @apply min-h-11 rounded-[5px] border border-field px-[0.7rem] py-2; }
+  button { @apply m-[0.3rem] cursor-pointer bg-brand text-white; }
+  button:disabled { @apply cursor-default opacity-55; }
+  input { @apply max-w-full bg-white; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible, summary:focus-visible {
+    @apply outline-3 outline-offset-2 outline-focus;
+  }
+  pre, code { @apply text-base; } /* Monospace would otherwise be 13 px. */
+  a { @apply text-brand underline; }
+  header, section, main > form { @apply mb-6; }
+  section, main > form { @apply rounded-[10px] border border-line bg-white p-[0.8rem] md:p-5; }
+  form label { @apply inline-flex flex-wrap items-center gap-2; }
+  fieldset { @apply m-0 min-w-0 border-0 p-0; }
+  table { @apply my-4 w-full border-collapse text-left; }
+  th, td { @apply border-b border-line p-[0.7rem] align-top; }
+  th { @apply font-bold; }
+  [role=alert] { @apply text-danger; }
+  details summary { @apply cursor-pointer; }
+}

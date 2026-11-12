@@ -1,0 +1,16 @@
+flowchart TD
+    A([Owner opens results, analysis,<br/>or guidance view]) --> B{Any confirmed records?}
+    B -- No --> B1[Show no-sales-data message<br/>and link to input form<br/>FR-602]
+    B -- Yes --> C[Recalculate daily quantities<br/>and baseline estimates<br/>FR-401, FR-404]
+    C --> D{Item has 2 or more<br/>distinct recorded dates?}
+    D -- No --> D1[Show Insufficient history<br/>for that item<br/>FR-403]
+    D -- Yes --> E[Show estimate rounded<br/>to 2 decimals<br/>FR-402, FR-601]
+    E --> G{At least one<br/>eligible item?}
+    D1 --> G
+    G -- No --> G1[Show Insufficient history;<br/>no guidance request<br/>FR-503]
+    G -- Yes --> H[Send only calculated figures<br/>to External AI Service<br/>FR-501]
+    H --> I{Non-empty response<br/>within 15 s?<br/>FR-505}
+    I -- No --> I1[Show Guidance unavailable;<br/>figures stay visible<br/>FR-503, FR-505]
+    I -- Yes --> J{Every item and number in<br/>the text matches the<br/>calculated figures?<br/>FR-504}
+    J -- No --> J1[Withhold guidance;<br/>show figures only<br/>FR-504]
+    J -- Yes --> K([Display guidance with figures<br/>and stock-check notice<br/>FR-502])

@@ -10,6 +10,7 @@ Numbers leave this module only as strings. See docs/DIUSHEN_IMPLEMENTATION.md.
 import math
 import re
 from collections.abc import Callable, Iterable
+from itertools import pairwise
 from datetime import date, timedelta
 from decimal import Decimal
 from fractions import Fraction
@@ -54,11 +55,13 @@ class AnalysisWindow(BaseModel):
     loggedDays: int
 
 
+# Quantities and averages are exact Decimals and leave the API as JSON numbers (M3 4.2);
+# the strings from decimal_text are parsed exactly by pydantic.
 class SeriesPoint(BaseModel):
     date: date
-    quantity: str
+    quantity: Decimal
     observed: bool  # False: the business logged this date without the item, so it counts as 0.
-    movingAverage: str | None
+    movingAverage: Decimal | None
     movingAverageRounded: bool
     calendarDaysSkipped: int  # Unlogged calendar days since the previous logged date.
 
@@ -67,17 +70,19 @@ class ItemEstimate(BaseModel):
     itemKey: str
     itemName: str
     windowLoggedDays: int
-    currentAverage: str | None
+    currentAverage: Decimal | None
     currentAverageRounded: bool
-    currentTotal: str | None
+    # M3 4.3/9.6: the average shown to the owner, rounded half-up to 1 decimal.
+    currentAverageDisplay: str | None
+    currentTotal: Decimal | None
     currentDaysWithSales: int | None
-    previousAverage: str | None
+    previousAverage: Decimal | None
     previousAverageRounded: bool
-    previousTotal: str | None
+    previousTotal: Decimal | None
     previousDaysWithSales: int | None
     trend: Trend
-    changePercent: str | None
-    suggestedQty: str | None
+    changePercent: Decimal | None
+    suggestedQty: Decimal | None
     series: list[SeriesPoint]
 
 
@@ -141,6 +146,12 @@ def decimal_text(value: Fraction, places: int = 6) -> tuple[str, bool]:
     return _scaled_text(round(value * 10**scale), scale), True
 
 
+def one_decimal(value: Fraction) -> str:
+    """Round half-up to one decimal place, exactly (M3 9.6 "average rounded to 1 decimal")."""
+    tenths = math.floor(value * 10 + Fraction(1, 2))
+    return f"{_integer_text(tenths // 10)}.{tenths % 10}"
+
+
 def _empty_response(as_of: date, start: date) -> AnalysisResponse:
     return AnalysisResponse(
         asOf=as_of, historyStart=start, historyEnd=as_of, loggedDays=0, status="NO_DATA",
@@ -196,7 +207,7 @@ def build_analysis(records: Iterable[dict], as_of: date, start: date) -> Analysi
     has_trend = logged_days >= TREND_REQUIRED_DAYS
     current_dates = logged_dates[-WINDOW_DAYS:] if has_estimate else []
     previous_dates = logged_dates[-TREND_REQUIRED_DAYS:-WINDOW_DAYS] if has_trend else []
-    skipped = [0] + [(later - earlier).days - 1 for earlier, later in zip(logged_dates, logged_dates[1:])]
+    skipped = [0] + [(later - earlier).days - 1 for earlier, later in pairwise(logged_dates)]
 
     estimates = []
     for item_key in matrix.columns:
@@ -228,6 +239,7 @@ def build_analysis(records: Iterable[dict], as_of: date, start: date) -> Analysi
         estimates.append(ItemEstimate(
             itemKey=item_key, itemName=labels[item_key], windowLoggedDays=WINDOW_DAYS,
             currentAverage=current_text, currentAverageRounded=current_rounded,
+            currentAverageDisplay=one_decimal(current) if current is not None else None,
             currentTotal=decimal_text(current_total)[0] if has_estimate else None,
             currentDaysWithSales=sum((day, item_key) in observed for day in current_dates) if has_estimate else None,
             previousAverage=previous_text, previousAverageRounded=previous_rounded,
@@ -250,15 +262,40 @@ def build_analysis(records: Iterable[dict], as_of: date, start: date) -> Analysi
     )
 
 
+def snapshots(result: AnalysisResponse) -> list[dict]:
+    """BaselineEstimate rows for SD-03 saveBaselines: one per item that has an estimate."""
+    rows = []
+    for estimate in result.estimates:
+        if estimate.suggestedQty is None:
+            continue
+        rows.append({
+            "itemName": estimate.itemName, "itemKey": estimate.itemKey, "windowDays": WINDOW_DAYS,
+            "loggedDays": result.loggedDays, "averageDailyQuantity": Decimal(estimate.currentAverage),
+            "priorAverageDailyQuantity": Decimal(estimate.previousAverage) if estimate.previousAverage else None,
+            "trend": estimate.trend, "suggestedRestockQty": int(estimate.suggestedQty),
+        })
+    return rows
+
+
 class BaselineAnalyzer:
-    """Computes fresh results from confirmed records; never reads or writes snapshots."""
+    """Computes results fresh from confirmed records every time (FR-404).
 
-    def __init__(self, fetch_records: Callable[[date, date], list[dict]] | None = None):
+    With save_snapshots, the results are also stored as BASELINE_ESTIMATES snapshots for that
+    asOf date, replacing earlier ones (SD-03 saveBaselines, M3 7.1). Snapshots are an audit
+    record only: they are never read back to produce a response, so they cannot go stale.
+    """
+
+    def __init__(self, fetch_records: Callable[[date, date], list[dict]] | None = None,
+                 save_snapshots: Callable[[date, list[dict]], None] | None = None):
         self._fetch_records = fetch_records or repository.get_confirmed_sales_between
+        self._save_snapshots = save_snapshots or repository.replace_baselines
 
-    def analyze(self, as_of: date) -> AnalysisResponse:
+    def analyze(self, as_of: date, *, save_snapshots: bool = False) -> AnalysisResponse:
         start = as_of - timedelta(days=HISTORY_CALENDAR_DAYS - 1)
-        return build_analysis(self._fetch_records(start, as_of), as_of, start)
+        result = build_analysis(self._fetch_records(start, as_of), as_of, start)
+        if save_snapshots:
+            self._save_snapshots(as_of, snapshots(result))
+        return result
 
 
 def resolve_as_of(requested: date | None, clock: Clock, location: list[str]) -> date:
@@ -271,5 +308,6 @@ def resolve_as_of(requested: date | None, clock: Clock, location: list[str]) -> 
     elif as_of < date.min + timedelta(days=HISTORY_CALENDAR_DAYS - 1):
         problem = "asOf is too early to calculate a 28-day history period"
     if problem:
-        raise HTTPException(422, detail=[{"loc": location, "msg": problem, "type": "value_error"}])
+        # M3 4.2: GET /analysis answers 400 for an invalid asOf.
+        raise HTTPException(400, detail=[{"loc": location, "msg": problem, "type": "value_error"}])
     return as_of

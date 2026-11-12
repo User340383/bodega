@@ -340,3 +340,23 @@ The `frontend-checks` service executes `npm run lint && npm test && npm run buil
 - Existing error shapes on other endpoints are preserved. A universal error-envelope change is deferred to shared-client coordination. The Starlette TestClient deprecation warning remains. This work did not rerun npm audit or change dependencies.
 - A fresh fetch still shows main at `630c5df3303e4536e299d26ab71863a589bc2dbc`, an ancestor of feature HEAD `c61ed711efddbd3b27764d87d66116e46a10d181`. No main commits were replaced or changed, and no merge was attempted. Shared-file overlap described in section 11 still requires peer review; unmerged teammate branches were not altered.
 - **The local patch is ready for team review. PR #1 itself is unchanged and does not yet contain these fixes.** Publishing them requires the user's separate commit/push authorization; merging still requires the team's contract/integration review. No commit, push, merge, rebase, reset, force-push, or PR action was performed.
+
+## 13. Integration update (`integration/m3-completion`)
+
+The final Milestone 3 (October 23) supersedes parts of this report. Changes on the integration branch:
+
+- **Limits restored.** The final M3 defines the limits that sections 4 and 12 call "undocumented": 2 decimals, 99,999.99, 1–100 characters. Migration 003 is unchanged; migration 005 re-adds them `NOT VALID` (decision D-03).
+- **Lifecycle per Diagram 4.** REJECTED and AI_UNAVAILABLE confirm directly; `manual-review` is removed (D-04).
+- **Unmerged branch work ported.** The substance of `cb55fce` is now in `005_final_data_design.sql`, `repository.py` and `retention.py`, rebuilt on current `main` instead of merged (D-01, D-02): manual entries, pending drafts, deletion, the date-range ledger, the 30-day purge, the image outbox, and snapshots.
+- **Your work is preserved.** The original branch and stash are kept in `backup/gabriel-data-state-cb55fce` and `backup/gabriel-stash-2026-11-08`.
+- **Current status:** `docs/DATA_DICTIONARY.md` and `docs/TRACEABILITY.md`.
+
+## 14. Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Deliverables complete locally:** the four-table schema (Alembic head `006`), transactional and idempotent `POST /confirm`, the rollback and duplicate-confirmation tests, the Draft Review table and the Sales History ledger.
+- **Withdrawn:** the draft migration 007, the 24-hour input deadline (D-27) and the retry transition (D-29). Retention is M3 7.4 again: `draftPayload` cleared on confirmation, input kept 30 days.
+- **Upgrade path (D-36, 2026-11-11):** a database that ran the draft 007 upgrades on the next start through `007_reserved` and `008_remove_unreleased_007`, keeping every submission, draft and sales record. Head is `008`. Applied to the local development database after a `pg_dump` backup (`bodega-db-backups/bodega-latest_rev007_2026-11-10.dump` and `.sql`, beside the checkouts); row checksums of `submissions` and `sales_records` were identical before and after, and two further restarts changed nothing.
+- **Added:** `backend/seeds/synthetic_sales.sql`, the SQL seed script WorkDivision's execution steps ask for (D-34); `/sales` paging (D-32); confirmation errors carry field paths that the review table shows on the row.
+- **Resolved by team review (2026-11-11, D-30):** invalid `/confirm` and `/manual-entries` requests now answer 400, as M3 4.2 lists. Earlier sections of this report that mention 422 for confirmation describe the state before this review. The envelope, the field paths, 404, 409 and the idempotent 200 are unchanged; regression tests prove a rejected request changes no records, status or draft.

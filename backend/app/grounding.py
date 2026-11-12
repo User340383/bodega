@@ -17,10 +17,14 @@ from .analysis import normalize_item
 from .llm import ItemEvidence
 
 MAX_MESSAGE_CHARS = 240  # Excludes the item's own name, whose length is unrestricted.
+MAX_MESSAGE_WORDS = 40  # M3 9.6 rule 7, counted over the whole message.
 WINDOW_DAYS_TEXT = "7"
 
-UP_WORDS = frozenset({"up", "rising", "rose", "increasing", "increased", "increase", "higher", "climbing"})
-DOWN_WORDS = frozenset({"down", "falling", "fell", "decreasing", "decreased", "decrease", "lower", "declining"})
+# M3 9.6 rule 5 rising/falling words are included; "more"/"less" stay unavailable.
+UP_WORDS = frozenset({"up", "rising", "rose", "rise", "increasing", "increased", "increase", "higher",
+                      "climbing", "growing", "grew"})
+DOWN_WORDS = frozenset({"down", "falling", "fell", "decreasing", "decreased", "decrease", "lower", "declining",
+                        "slowing", "slower", "fewer"})
 STABLE_WORDS = frozenset({"stable", "steady", "flat", "unchanged"})
 TREND_WORDS = {"UP": UP_WORDS, "DOWN": DOWN_WORDS, "STABLE": STABLE_WORDS, "INSUFFICIENT_DATA": frozenset()}
 
@@ -31,8 +35,11 @@ check compared confirmed consider cover covers current date dates day days each 
 from guidance has history in is it its latest logged may might of on or order ordering over
 per period plan planning previous prior qty quantity recent restock restocking sale sales
 selling sold stock suggest suggested suggests than that the this to trend trending unit units
-was were while with your actual
+was were while with your actual you last having hand next
 """.split())
+# The M3 9.6 INSUFFICIENT_DATA trend phrase. Negation stays unavailable everywhere else, so this
+# exact phrase is accepted only when the item really has no trend.
+NO_TREND_PHRASE = re.compile(r"\bnot enough history for a trend yet\b", re.IGNORECASE)
 ALLOWED_WORDS = NEUTRAL_WORDS | UP_WORDS | DOWN_WORDS | STABLE_WORDS
 
 _MARKUP = re.compile(r"[<>&*_`\[\]#|\\]")
@@ -43,7 +50,7 @@ _FOLLOWING_WORDS = re.compile(r"\s*([A-Za-z]+)?(?:\s+([A-Za-z]+))?")
 _WORD = re.compile(r"[A-Za-z]+")
 _STOCK = re.compile(r"\bstock\b", re.IGNORECASE)
 _STOCK_CHECK = re.compile(r"\bcheck\s+(?:your\s+)?(?:actual\s+|current\s+)?stock\b", re.IGNORECASE)
-_WINDOW_FOLLOWERS = {"logged", "latest", "recent", "previous", "prior", "sales"}
+_WINDOW_FOLLOWERS = {"logged", "latest", "recent", "previous", "prior", "sales", "selling"}
 
 
 @dataclass(frozen=True)
@@ -96,6 +103,8 @@ def _same_quantity(claimed, authoritative: str) -> bool:
 def _check_numbers(body: str, item: ItemEvidence) -> str | None:
     quantity = _exact(item.suggestedQty)
     averages = {_exact(item.currentAverage)}
+    if item.averageOneDecimal is not None:
+        averages.add(_exact(item.averageOneDecimal))  # M3 9.6 rule 4; "4.0" also covers "4".
     if item.previousAverage is not None:
         averages.add(_exact(item.previousAverage))
     window = _exact(WINDOW_DAYS_TEXT)
@@ -139,8 +148,12 @@ def _check_message(message: str, item: ItemEvidence) -> str | None:
     name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(item.itemName)}(?![A-Za-z0-9])", re.IGNORECASE)
     if not name.search(message):
         return "ITEM_NOT_NAMED"
+    if len(message.split()) > MAX_MESSAGE_WORDS:
+        return "MESSAGE_TOO_LONG"
     # The owner's label may contain digits or symbols ("Coke 2L"); those are not claims.
     body = name.sub(" ", message)
+    if item.trend == "INSUFFICIENT_DATA":
+        body = NO_TREND_PHRASE.sub(" ", body)
     if _MARKUP.search(body):
         return "UNSAFE_MARKUP"
     if len(body) > MAX_MESSAGE_CHARS:

@@ -3,7 +3,8 @@ import { clearSession, readAccessCode, writeAccessCode } from './session'
 
 export const SESSION_ENDED = 'Your access code was not accepted. Please sign in again.'
 // Any authenticated, read-only endpoint proves the code; /health is public and cannot.
-const VERIFY_PATH = '/api/v1/sales?limit=1'
+// (GET /submissions would also run the stale sweep, so the read-only ledger is used.)
+const VERIFY_PATH = '/api/v1/sales'
 
 /**
  * The signed-in session outside React: one stable API client that always reads the current code,

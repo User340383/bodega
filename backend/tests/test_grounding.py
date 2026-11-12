@@ -13,7 +13,7 @@ from app.analysis import build_analysis
 from app.grounding import MAX_MESSAGE_CHARS, check_grounding
 from app.guidance import GuidanceEngine, STOCK_NOTICE, template_message
 from app.llm import ItemEvidence, MockLLMService, MockScenario, UnavailableWordingProvider
-from conftest import AS_OF, logged_dates
+from conftest import _t, AS_OF, logged_dates
 
 START = date(2026, 4, 3)
 BREAD = ItemEvidence('Bread', '28', '4', '2', 'UP', '100', 7)
@@ -155,7 +155,7 @@ def test_valid_mock_wording_is_used_with_authoritative_fields():
     result = GuidanceEngine(provider).generate(analysis())
     assert (result.source, result.groundingPassed, result.failedRule, result.provider) == ('AI_WORDED', True, None, 'mock')
     bread = result.items[0]
-    assert (bread.itemName, bread.suggestedQty, bread.trend) == ('Bread', '28', 'UP')
+    assert (bread.itemName, _t(bread.suggestedQty), bread.trend) == ('Bread', '28', 'UP')
     assert bread.message == ('Bread: plan 28 units to cover 7 logged sales dates. '
                              'Average is 4 per logged date. Sales trend is up.')
     assert result.stockNotice == STOCK_NOTICE
@@ -178,7 +178,7 @@ def test_every_mock_failure_falls_back_to_a_labeled_template(scenario, rule):
     assert (result.source, result.groundingPassed, result.failedRule) == ('TEMPLATE', False, rule)
     assert result.failureReason and result.providerCalled
     assert [item.message for item in result.items] == [template_message(e) for e in source.estimates]
-    assert result.items[0].suggestedQty == '28'
+    assert _t(result.items[0].suggestedQty) == '28'
     assert len(provider.calls) == 1  # No automatic retry.
 
 
@@ -214,7 +214,7 @@ def test_no_provider_call_without_an_eligible_estimate(days):
 def test_seven_to_thirteen_dates_get_guidance_without_a_trend_claim():
     result = GuidanceEngine(MockLLMService()).generate(analysis(9))
     assert result.source == 'AI_WORDED'
-    assert all(item.trend == 'INSUFFICIENT_DATA' and item.previousAverage is None for item in result.items)
+    assert all(item.trend == 'INSUFFICIENT_DATA' and _t(item.previousAverage) is None for item in result.items)
     assert 'trend is' not in result.items[0].message
     assert 'not enough history' in template_message(analysis(9).estimates[0])
 
@@ -225,7 +225,7 @@ def test_provider_receives_only_calculated_evidence():
     request = provider.calls[0]
     for item in request.items:
         assert set(asdict(item)) == {'itemName', 'suggestedQty', 'currentAverage', 'previousAverage',
-                                     'trend', 'changePercent', 'windowLoggedDays'}
+                                     'trend', 'changePercent', 'windowLoggedDays', 'averageOneDecimal'}
     assert 'unitPrice' not in request.prompt()
     assert 'saleDate' not in request.prompt()
 
@@ -255,7 +255,43 @@ def test_template_handles_rounded_and_zero_quantities():
     records += [{'saleDate': day, 'itemName': 'New', 'quantity': Decimal('1')} for day in dates[7:]]
     records.append({'saleDate': dates[-1], 'itemName': 'Odd', 'quantity': Decimal('10')})
     estimates = {e.itemKey: e for e in build_analysis(records, AS_OF, START).estimates}
-    assert 'no quantity is suggested' in template_message(estimates['old'])
-    assert 'trending down' in template_message(estimates['old'])
-    assert 'about 1.428571' in template_message(estimates['odd'])
-    assert 'plan for 10 units' in template_message(estimates['odd'])
+    # M3 9.6 template: "{itemName}: you sold about {average, 1 decimal} per logged day over your last
+    # 7 logged days ({trendPhrase}). Consider having {suggestedRestockQty} on hand for your next 7 selling days."
+    assert template_message(estimates['old']) == (
+        'Old: you sold about 0.0 per logged day over your last 7 logged days (sales are slowing). '
+        'Consider having 0 on hand for your next 7 selling days.')
+    assert template_message(estimates['odd']) == (
+        'Odd: you sold about 1.4 per logged day over your last 7 logged days (sales are rising). '
+        'Consider having 10 on hand for your next 7 selling days.')
+
+
+class TemplateEcho:
+    """A provider that answers with exactly the fallback template."""
+    name = 'template-echo'
+
+    def __init__(self, estimates):
+        self.messages = {e.itemName: template_message(e) for e in estimates}
+
+    def generate(self, request):
+        return json.dumps({'items': [{'itemName': item.itemName, 'suggestedQty': _t(item.suggestedQty),
+                                      'message': self.messages[item.itemName]} for item in request.items]})
+
+
+@pytest.mark.parametrize('days', [9, 14])
+def test_template_satisfies_every_grounding_rule_by_construction(days):
+    """M3 9.6: the template satisfies rules 1-7 by construction, and a unit test asserts this."""
+    dates = logged_dates(days)
+    records = []
+    for index, day in enumerate(dates):
+        recent = index >= days - 7
+        records += [{'saleDate': day, 'itemName': 'Bread', 'quantity': Decimal('4' if recent else '2')},
+                    {'saleDate': day, 'itemName': 'Eggs', 'quantity': Decimal('1' if recent else '3')},
+                    {'saleDate': day, 'itemName': 'Milk', 'quantity': Decimal('2.5')},
+                    {'saleDate': day, 'itemName': 'Coke 2L', 'quantity': Decimal('1.25') if recent else Decimal('1')}]
+    source = build_analysis(records, AS_OF, START)
+    trends = {e.trend for e in source.estimates}
+    assert trends == ({'UP', 'DOWN', 'STABLE'} if days == 14 else {'INSUFFICIENT_DATA'})
+    result = GuidanceEngine(TemplateEcho(source.estimates)).generate(source)
+    assert (result.source, result.groundingPassed, result.failedRule) == ('AI_WORDED', True, None)
+    for item in result.items:
+        assert len(item.message.split()) <= 40

@@ -1,17 +1,22 @@
-header, section, main > form { margin-bottom: 1.5rem; }
-section, main > form { background: white; border: 1px solid #d2ddd5; padding: 1.25rem; border-radius: 10px; }
-form label { display: inline-flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-fieldset { border: 0; padding: 0; min-width: 0; }
-.table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; text-align: left; margin: 1rem 0; }
-th, td { padding: .7rem; border-bottom: 1px solid #d2ddd5; vertical-align: top; }
-td input:not([type=checkbox]) { width: 100%; min-width: 120px; }
-.verify { background: #fff3ce; }
-.verification { font-size: .85rem; }
-.verification input { min-height: 24px; }
-[role=alert] { color: #a02323; }
-.pagination { display: flex; align-items: center; gap: .8rem; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-@media (max-width: 600px) { #root { padding: .75rem; } section { padding: .8rem; } }
+/* Shared review, history and form styles, written with Tailwind utilities (see index.css). */
+@reference "./index.css";
 
-.field-error { color: #a02323; font-size: .85rem; margin: .3rem 0; }
+.table-scroll { @apply overflow-x-auto; }
+td input:not([type=checkbox]) { @apply w-full min-w-[120px]; }
+.verify { @apply bg-warn-soft; }
+.verification { @apply flex items-center gap-[0.4rem] text-base; }
+.verification input { @apply min-h-6 min-w-6; }
+.pagination { @apply flex items-center gap-3; }
+.sr-only { @apply absolute h-px w-px overflow-hidden p-0 whitespace-nowrap [clip-path:inset(50%)]; }
+.field-error { @apply my-[0.3rem] text-base text-danger; }
+
+/* History, manual entry and pending-draft actions (FR-104, FR-216, FR-304). */
+.hint { @apply text-base text-muted; }
+.history-controls { @apply flex flex-wrap items-end gap-x-4 gap-y-2; }
+button.secondary { @apply border-brand bg-white text-brand; }
+button.danger { @apply border-danger bg-danger; }
+.confirm-delete { @apply my-4 rounded-lg border-2 border-danger bg-danger-soft p-4; }
+.confirm-delete h3 { @apply mt-0; }
+.manual-entry { @apply mt-2; }
+.manual-entry h3 { @apply mt-0; }
+.delete-all { @apply border-danger/40; }

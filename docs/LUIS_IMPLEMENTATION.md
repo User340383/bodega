@@ -132,3 +132,23 @@ A repository admin applies these under **Settings → Branches**, or with `gh ap
 - **No real AI guidance in production.** `llm.py` has no Claude guidance provider yet. Production falls back to template ("Standard advice") wording until one is added. `AI_GUIDANCE_MODEL` is already configured for it.
 - **ruff is not in CI yet.** M3 8.5 lists `ruff check`, but the existing backend code has 38 ruff findings. Add the step once the owners have cleaned them up.
 - **Migrations are custom.** M3 mentions Alembic; the backend uses its own ordered SQL migrations run at startup. The effect is the same (`/health` answers only after migrations).
+
+## Integration update (`integration/m3-completion`)
+
+- **Security fix.** `--forwarded-allow-ips='*'` let clients bypass the NFR-718 lockout by rotating `X-Forwarded-For`. The limiter now counts the right-most hop (`TRUSTED_PROXY_HOPS`, 1 on Render), and uvicorn runs with `--no-proxy-headers` (D-12). Regression tests and a CI guard are included.
+- **New CI job "Lint and Secret Scan":** ruff (`backend/ruff.toml`) and gitleaks over the full history. Deploy waits for it.
+- **Pinned dependencies.** `requirements.txt` is pinned to the verified versions.
+- **HSTS** is set on the API and every nginx location.
+- **Logging and errors.** Structured JSON request logs with `X-Request-ID` (NFR-723), and the M3 error envelope with 400 validation.
+- **Pending drafts** now read `GET /api/v1/submissions`, with Discard.
+- **Browser check (Edge, 360–1920 px):** no overflow, text ≥ 16 px, targets ≥ 44 px, 0 axe WCAG 2.1 AA violations.
+- **Still manual:** Render provisioning, deploy hook secrets, the database plan and branch protection.
+
+## Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Your deliverables are complete locally:** one-command Compose stack, `.env.example`, `render.yaml`, CI on every pull request, the `main` ruleset (1 approving review, 3 required checks) and the application shell. The live Render deployment still needs the account.
+- **Changes in your files, for your review:** `backend/Dockerfile` copies `seeds/` (SQL seed script, D-34). `ci.yml` and `compose.test.yml` gain an HTTP Smoke Test job with MinIO and a second backend using the mock provider. `main.py` adds the envelope for unexpected errors (`INTERNAL_ERROR`) and 405, `/sales` paging (D-32), and 400 for every validation error including confirmation (D-30, resolved by team review on 2026-11-11). `DraftsPage.jsx` and `ReviewPage.jsx`: the review page gains "Discard this draft".
+- **Please decide:** add "Lint and Secret Scan" and "HTTP Smoke Test" to the required checks of the ruleset.
+- **2026-11-11:** the focused skip link is now 44 px or larger (D-37). `scripts/prodcheck.py` checks the D-30 status codes and reads `total` from the paged ledger. New `scripts/browser_a11y.mjs` (Edge, axe-core 4.10.1) records the accessibility and layout check that was previously run by hand.

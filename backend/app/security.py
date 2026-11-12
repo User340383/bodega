@@ -10,6 +10,15 @@ from fastapi import HTTPException, Request
 REQUIRED_SETTINGS = ("DATABASE_URL", "APP_ACCESS_CODE", "OWNER_ID")
 MAX_FAILURES = 10
 FAILURE_WINDOW_SECONDS = 15 * 60
+MAX_PROXY_HOPS = 5
+
+
+def trusted_proxy_hops() -> int:
+    """How many reverse proxies in front of the app append to X-Forwarded-For (Render: 1; local: 0)."""
+    value = os.getenv("TRUSTED_PROXY_HOPS", "0").strip() or "0"
+    if not value.isdigit() or int(value) > MAX_PROXY_HOPS:
+        raise RuntimeError(f"TRUSTED_PROXY_HOPS must be a whole number from 0 to {MAX_PROXY_HOPS}")
+    return int(value)
 
 
 def check_required_settings():
@@ -17,6 +26,22 @@ def check_required_settings():
     missing = [name for name in REQUIRED_SETTINGS if not os.getenv(name, "").strip()]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+    trusted_proxy_hops()
+
+
+def client_address(request: Request) -> str:
+    """The address the rate limit counts.
+
+    A client controls every X-Forwarded-For entry except the ones its trusted proxies append
+    on the right, so only the entry written by the outermost trusted proxy is used. The
+    left-most entry, which uvicorn's `--forwarded-allow-ips='*'` would pick, is never trusted.
+    """
+    hops = trusted_proxy_hops()
+    if hops:
+        forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+        if len(forwarded) >= hops:
+            return forwarded[-hops]
+    return request.client.host if request.client else "unknown"
 
 
 def allowed_origins():
@@ -70,7 +95,7 @@ def require_owner_access(request: Request):
     limiter = getattr(request.app.state, "access_limiter", None)
     if limiter is None:
         limiter = request.app.state.access_limiter = FailedAttemptLimiter()
-    client = request.client.host if request.client else "unknown"
+    client = client_address(request)
     if limiter.blocked(client):
         raise HTTPException(status_code=429, detail="Too many wrong access codes. Wait 15 minutes and try again.")
 

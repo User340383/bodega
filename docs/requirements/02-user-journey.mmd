@@ -1,0 +1,27 @@
+flowchart TD
+    A([Owner selects sales date and<br/>uploads image or pastes text]) --> B{Input valid?<br/>FR-101 to FR-103}
+    B -- No --> B1[Show validation message;<br/>no AI request sent] --> A
+    B -- Yes --> P[Apply privacy safeguards:<br/>mask contacts, strip image metadata<br/>FR-212, FR-213]
+    P --> C[Send to External AI Service<br/>FR-201]
+    C --> T{Response within 30 s?<br/>FR-211}
+    T -- No --> R{Automatic retry<br/>already used?}
+    R -- No --> C
+    R -- Yes --> M[Show AI temporarily unavailable;<br/>keep date and input;<br/>offer manual entry<br/>FR-104, FR-211]
+    T -- "Yes: error, unreadable<br/>response or no rows" --> F[Show failure or<br/>no-records message<br/>FR-205] --> M
+    T -- "Yes: rows returned" --> L{Overall legibility<br/>score below 0.40?<br/>FR-210}
+    L -- Yes --> U[Image unreadable:<br/>show retake tips<br/>FR-210] --> M
+    L -- No --> S[Read confidence score<br/>of each field<br/>FR-206]
+    S --> H{Field confidence}
+    H -- "≥ 0.85 high" --> H1[Prefill value,<br/>no warning<br/>FR-207]
+    H -- "0.60 to 0.84 medium,<br/>or score missing" --> H2[Prefill and highlight<br/>Please verify<br/>FR-208]
+    H -- "below 0.60 low" --> H3[Leave blank:<br/>Could not read, enter value<br/>FR-209]
+    H1 --> D[Owner reviews draft<br/>FR-202, FR-203]
+    H2 --> D
+    H3 --> D
+    M --> D
+    D --> V{All rows valid and every<br/>highlighted field verified?<br/>FR-204, FR-208}
+    V -- No --> D
+    V -- Yes --> W[Owner confirms draft]
+    W --> X{Save succeeded?<br/>FR-302}
+    X -- No --> X1[Show save-failure message;<br/>no rows persisted] --> D
+    X -- Yes --> Y([Records added to sales history;<br/>raw input deleted within 24 h<br/>FR-301, FR-215])

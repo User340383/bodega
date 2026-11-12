@@ -1,0 +1,171 @@
+classDiagram
+  direction TB
+  class SalesCaptureController {
+    -inference: InferenceService
+    -repository: RecordRepository
+    -storage: ObjectStorage
+    +extract(ownerId: UUID, saleDate: date, file: Optional~UploadFile~, text: Optional~str~) ExtractResponse
+    +confirm(ownerId: UUID, request: ConfirmRequest) ConfirmResponse
+    +createManualEntry(ownerId: UUID, request: ManualEntryRequest) ConfirmResponse
+    +listOpenSubmissions(ownerId: UUID) list~SubmissionSummary~
+    +getSubmission(ownerId: UUID, submissionId: UUID) SubmissionDetail
+    +deleteSubmission(ownerId: UUID, submissionId: UUID) None
+    +getSalesHistory(ownerId: UUID, start: date, end: date) list~StructuredSalesRecord~
+    -validateInput(saleDate: date, file: Optional~UploadFile~, text: Optional~str~) None
+    -validateLines(lines: list~ConfirmLine~) None
+  }
+  class InferenceService {
+    -model: VisionModel
+    -repository: RecordRepository
+    +timeoutSeconds: int = 30
+    +maxAttempts: int = 2
+    +sanitizeImage(image: bytes) bytes
+    +maskText(text: str) str
+    +maskContacts(result: ExtractionResult) ExtractionResult
+    +extractFromImage(submissionId: UUID, image: bytes) SalesDraft
+    +extractFromText(submissionId: UUID, maskedText: str) SalesDraft
+    +applyConfidenceBands(submissionId: UUID, result: ExtractionResult) SalesDraft
+  }
+  class VisionModel {
+    <<interface>>
+    +extractFromImage(image: bytes, prompt: str, timeout: int) ExtractionResult
+    +extractFromText(text: str, prompt: str, timeout: int) ExtractionResult
+  }
+  class ClaudeVisionModel {
+    -client: Anthropic
+    -modelName: str
+    +extractFromImage(image: bytes, prompt: str, timeout: int) ExtractionResult
+    +extractFromText(text: str, prompt: str, timeout: int) ExtractionResult
+  }
+  class MockVisionModel {
+    -cannedResult: ExtractionResult
+    -failMode: Optional~str~
+    +extractFromImage(image: bytes, prompt: str, timeout: int) ExtractionResult
+    +extractFromText(text: str, prompt: str, timeout: int) ExtractionResult
+  }
+  class ObjectStorage {
+    -bucketName: str
+    +putObject(data: bytes, contentType: str) str
+    +getSignedUrl(key: str, expiresIn: int = 300) str
+    +deleteObject(key: str) None
+
+  }
+  class RetentionService {
+    -repository: RecordRepository
+    -storage: ObjectStorage
+    +retentionDays: int = 30
+    +staleSeconds: int = 120
+    +runSweep(now: datetime) None
+  }
+  class RecordRepository {
+    +createSubmission(ownerId: UUID, inputType: InputType, saleDate: date, imageKey: Optional~str~, maskedText: Optional~str~) UUID
+    +updateStatus(submissionId: UUID, status: SubmissionStatus) None
+    +saveDraft(draft: SalesDraft) None
+    +getSubmission(ownerId: UUID, submissionId: UUID) Optional~Submission~
+    +listOpenSubmissions(ownerId: UUID) list~Submission~
+    +confirmSubmission(ownerId: UUID, submissionId: UUID, lines: list~ConfirmLine~) ConfirmOutcome
+    +createManualSubmission(ownerId: UUID, submissionId: UUID, saleDate: date, lines: list~ConfirmLine~) ConfirmOutcome
+    +deleteSubmission(ownerId: UUID, submissionId: UUID) Optional~str~
+    +getConfirmedRecords(ownerId: UUID, start: date, end: date) list~StructuredSalesRecord~
+    +markStale(olderThan: datetime) int
+    +purgeExpired(cutoff: datetime) list~str~
+  }
+  class ExtractionResult {
+    +overallConfidence: float
+    +lines: list~ExtractedLine~
+  }
+  class ExtractedLine {
+    +itemName: Optional~str~
+    +quantity: Optional~Decimal~
+    +unitPrice: Optional~Decimal~
+    +itemNameConfidence: Optional~float~
+    +quantityConfidence: Optional~float~
+    +unitPriceConfidence: Optional~float~
+  }
+  class SalesDraft {
+    +submissionId: UUID
+    +status: SubmissionStatus
+    +message: Optional~str~
+    +lines: list~DraftLine~
+  }
+  class DraftLine {
+    +lineId: int
+    +itemName: Optional~str~
+    +quantity: Optional~Decimal~
+    +unitPrice: Optional~Decimal~
+    +bands: dict~str, ConfidenceBand~
+  }
+  class Submission {
+    +id: UUID
+    +ownerId: UUID
+    +inputType: InputType
+    +status: SubmissionStatus
+    +saleDate: date
+    +imageKey: Optional~str~
+    +maskedText: Optional~str~
+    +draftPayload: Optional~dict~
+    +createdAt: datetime
+    +updatedAt: datetime
+    +confirmedAt: Optional~datetime~
+    +records: list~StructuredSalesRecord~
+  }
+  class StructuredSalesRecord {
+    +id: UUID
+    +submissionId: UUID
+    +lineNo: int
+    +itemName: str
+    +itemKey: str
+    +quantity: Decimal
+    +unitPrice: Decimal
+    +source: RecordSource
+    +saleDate: date
+    +lineTotal() Decimal
+  }
+  class SubmissionStatus {
+    <<enumeration>>
+    UPLOADED
+    CLASSIFYING
+    NEEDS_VERIFICATION
+    CONFIRMED
+
+    REJECTED
+    AI_UNAVAILABLE
+  }
+  class ConfidenceBand {
+    <<enumeration>>
+    HIGH
+    MEDIUM
+    LOW
+    UNSCORED
+  }
+  class InputType {
+    <<enumeration>>
+    IMAGE
+    TEXT
+    MANUAL
+  }
+  class RecordSource {
+    <<enumeration>>
+    AI_EXTRACTED
+    MANUAL
+  }
+  SalesCaptureController --> InferenceService : keeps
+  SalesCaptureController --> RecordRepository : keeps
+  SalesCaptureController --> ObjectStorage : keeps
+  SalesCaptureController ..> SalesDraft : returns
+  InferenceService --> VisionModel : keeps
+  InferenceService --> RecordRepository : keeps
+  InferenceService ..> ExtractionResult : receives
+  InferenceService ..> SalesDraft : creates
+  RetentionService --> RecordRepository : keeps
+  RetentionService --> ObjectStorage : keeps
+  VisionModel <|.. ClaudeVisionModel : implements
+  VisionModel <|.. MockVisionModel : implements
+  ExtractionResult *-- "0..100" ExtractedLine : owns
+  SalesDraft *-- "0..100" DraftLine : owns
+  Submission *-- "0..100" StructuredSalesRecord : owns
+  RecordRepository ..> Submission : reads and writes
+  Submission --> SubmissionStatus : status
+  Submission --> InputType : inputType
+  DraftLine --> ConfidenceBand : bands
+  StructuredSalesRecord --> RecordSource : source

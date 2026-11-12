@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import SalesTrendChart from './SalesTrendChart'
 import './ResultsDashboard.css'
 
@@ -10,6 +10,9 @@ const TRENDS = {
 }
 
 const NO_ESTIMATE = new Set(['NO_DATA', 'INSUFFICIENT_HISTORY'])
+// M3 9.7 fixed notices (exact text). The API repeats the stock notice with every advice response.
+export const STOCK_NOTICE = 'These numbers come only from the sales you logged. Check what you already have in stock before you buy.'
+export const TEMPLATE_LABEL = 'Standard advice'
 
 function TrendBadge({ trend }) {
   const { icon, label, className } = TRENDS[trend]
@@ -24,13 +27,15 @@ function average(text, rounded) {
 function changeText(estimate) {
   if (estimate.trend === 'INSUFFICIENT_DATA') return 'Needs 14 logged dates to compare.'
   if (estimate.changePercent === null) {
-    return estimate.currentAverage === '0' ? 'No sales in either period.' : 'No sales in the previous 7 logged dates.'
+    return Number(estimate.currentAverage) === 0 ? 'No sales in either period.' : 'No sales in the previous 7 logged dates.'
   }
-  const sign = estimate.changePercent.startsWith('-') || estimate.changePercent === '0' ? '' : '+'
+  const sign = Number(estimate.changePercent) <= 0 ? '' : '+'
   return `${sign}${estimate.changePercent}% against the previous 7 logged dates.`
 }
 
-function ItemCard({ estimate }) {
+// Memoized: requesting advice must not re-render every item card and chart (NFR-705: the progress
+// indicator appears within 1 s even with 100 items on a slow phone CPU).
+const ItemCard = memo(function ItemCard({ estimate }) {
   // Item keys can contain spaces, so they cannot serve as IDs for aria-labelledby.
   const headingId = useId()
   return <article className="item-card" aria-labelledby={headingId}>
@@ -40,18 +45,20 @@ function ItemCard({ estimate }) {
     </div>
     {estimate.suggestedQty !== null && <>
       <dl className="item-figures">
-        <div><dt>Planning quantity</dt><dd>{estimate.suggestedQty}</dd></div>
-        <div><dt>Average per logged date</dt><dd>{average(estimate.currentAverage, estimate.currentAverageRounded)}</dd></div>
-        <div><dt>Previous 7-date average</dt><dd>{average(estimate.previousAverage, estimate.previousAverageRounded)}</dd></div>
+        {/* M3 section 3 labels (FR-406, FR-402); the average is shown to 1 decimal (M3 4.3). */}
+        <div><dt>Suggested stock for your next 7 selling days</dt><dd>{estimate.suggestedQty}</dd></div>
+        <div><dt>Average sold per logged day (last 7 logged days)</dt><dd>{estimate.currentAverageDisplay}</dd></div>
+        <div><dt>Previous 7 logged days average</dt><dd>{average(estimate.previousAverage, estimate.previousAverageRounded)}</dd></div>
       </dl>
-      <p className="item-note">{changeText(estimate)} Sold on {estimate.currentDaysWithSales} of the latest {estimate.windowLoggedDays} logged dates.</p>
+      <p className="item-note">{changeText(estimate)} Sold on {estimate.currentDaysWithSales} of the latest {estimate.windowLoggedDays} logged dates.
+        {estimate.currentAverageRounded && ` Exact average: ${average(estimate.currentAverage, true)}.`}</p>
     </>}
     <SalesTrendChart itemName={estimate.itemName} series={estimate.series} />
   </article>
-}
+})
 
 function sourceLabel(result) {
-  if (result.source === 'TEMPLATE') return 'Template wording from backend figures'
+  if (result.source === 'TEMPLATE') return result.sourceLabel || TEMPLATE_LABEL
   if (result.provider === 'mock') return 'AI-worded by the mock provider (demo text, not a real AI model)'
   return 'AI-worded and checked against backend figures'
 }
@@ -60,6 +67,7 @@ function GuidanceResult({ result }) {
   return <div className="guidance-result">
     {result.items.length > 0 && <p className="guidance-source"><strong>Source:</strong> {sourceLabel(result)}</p>}
     {result.failureReason && <p className="guidance-reason">{result.failureReason}</p>}
+    {result.omittedItems > 0 && <p className="guidance-reason">Advice covers the {result.items.length} items with the highest suggested stock, to keep it short. The numbers for all items are shown above.</p>}
     {result.items.length > 0 && <ul className="guidance-items">
       {result.items.map(item => <li key={item.itemName}>{item.message}</li>)}
     </ul>}
@@ -127,8 +135,12 @@ export default function ResultsDashboard({ request, revision }) {
         {analysis.previousWindow && ` Previous 7 logged dates: ${analysis.previousWindow.start} to ${analysis.previousWindow.end}.`}
       </p>}
 
-      {analysis.status === 'NO_DATA' && <p>Confirm sales to start building a history. Nothing is estimated until then.</p>}
-      {analysis.status === 'INSUFFICIENT_HISTORY' && <p>No averages or planning quantities are shown yet. The charts below show confirmed sales only.</p>}
+      {analysis.status === 'NO_DATA' && <p className="results-empty">No sales are saved for these dates yet, so nothing is estimated.{' '}
+        <a className="button-link" href="/capture">Capture sales</a></p>}
+      {analysis.status === 'INSUFFICIENT_HISTORY' && <p className="results-empty">
+        Log at least {analysis.requiredDays} days of sales to see estimates ({analysis.loggedDays} of {analysis.requiredDays} so far).
+        The charts below show confirmed sales only.</p>}
+      {!NO_ESTIMATE.has(analysis.status) && <p className="stock-notice"><strong>Check your stock:</strong> {STOCK_NOTICE}</p>}
 
       {analysis.estimates.length > 0 && <>
         <h3>Items</h3>
@@ -136,13 +148,13 @@ export default function ResultsDashboard({ request, revision }) {
       </>}
 
       <div className="guidance-panel">
-        <h3>Restocking guidance</h3>
+        <h3>Restocking advice</h3>
         <p className="guidance-intro">Planning suggestions based on confirmed sales. Bodega does not record current stock, so these are not low-stock alerts.</p>
         <button type="button" onClick={requestGuidance} disabled={loading || NO_ESTIMATE.has(analysis.status) || Boolean(currentGuidance?.loading)}>
-          {currentGuidance?.loading ? 'Getting guidance…' : 'Get restocking guidance'}
+          {currentGuidance?.loading ? 'Getting advice…' : 'Get restocking advice'}
         </button>
         {NO_ESTIMATE.has(analysis.status) && <p className="guidance-reason">Guidance becomes available after {analysis.requiredDays} logged sales dates.</p>}
-        {currentGuidance?.loading && <p role="status">Getting guidance…</p>}
+        {currentGuidance?.loading && <p role="status">Getting advice… this can take up to 15 seconds.</p>}
         {currentGuidance?.error && <p role="alert">{currentGuidance.error}</p>}
         {currentGuidance?.result && <GuidanceResult result={currentGuidance.result} />}
         {guidanceRetired && <p className="guidance-reason">Earlier guidance was cleared because the analysis changed. Request it again for the current results.</p>}

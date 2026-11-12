@@ -6,7 +6,7 @@ from fractions import Fraction
 import pytest
 
 from app.analysis import BaselineAnalyzer, build_analysis, classify_trend, decimal_text
-from conftest import AS_OF, logged_dates
+from conftest import _t, AS_OF, logged_dates
 
 START = date(2026, 4, 3)
 
@@ -24,11 +24,11 @@ def test_required_worked_example():
     dates = logged_dates(14)
     records = rows(dates[:7], 2) + rows(dates[7:], 4)
     estimate = only(build_analysis(records, AS_OF, START))
-    assert estimate.previousAverage == '2'
-    assert estimate.currentAverage == '4'
+    assert _t(estimate.previousAverage) == '2'
+    assert _t(estimate.currentAverage) == '4'
     assert estimate.trend == 'UP'
-    assert estimate.suggestedQty == '28'
-    assert estimate.changePercent == '100'
+    assert _t(estimate.suggestedQty) == '28'
+    assert _t(estimate.changePercent) == '100'
 
 
 def test_analyzer_requests_the_inclusive_28_day_bounds():
@@ -58,7 +58,7 @@ def test_zero_prior_average_reports_up_without_a_percentage():
     dates = logged_dates(14)
     records = rows(dates[:7], 1, 'Milk') + rows(dates[7:], 3, 'Bread')
     bread = {e.itemKey: e for e in build_analysis(records, AS_OF, START).estimates}['bread']
-    assert (bread.previousAverage, bread.trend, bread.changePercent) == ('0', 'UP', None)
+    assert (_t(bread.previousAverage), bread.trend, _t(bread.changePercent)) == ('0', 'UP', None)
 
 
 @pytest.mark.parametrize('total,expected', [('10', '10'), ('10.0000001', '11'), ('0.1', '1'), ('21', '21')])
@@ -68,16 +68,16 @@ def test_planning_quantity_is_the_exact_ceiling(total, expected):
     records = rows(dates[:1], total)
     records += [{'saleDate': day, 'itemName': 'Other', 'quantity': Decimal('1')} for day in dates]
     bread = {e.itemKey: e for e in build_analysis(records, AS_OF, START).estimates}['bread']
-    assert bread.suggestedQty == expected
+    assert _t(bread.suggestedQty) == expected
 
 
 def test_repeating_average_is_flagged_rounded_while_total_stays_exact():
     dates = logged_dates(7)
     estimate = only(build_analysis(rows(dates[:1], 10) + rows(dates[1:], 1), AS_OF, START))
-    assert estimate.currentTotal == '16'
-    assert estimate.currentAverage == '2.285714'
+    assert _t(estimate.currentTotal) == '16'
+    assert _t(estimate.currentAverage) == '2.285714'
     assert estimate.currentAverageRounded is True
-    assert estimate.suggestedQty == '16'
+    assert _t(estimate.suggestedQty) == '16'
 
 
 def test_precision_survives_values_float_and_default_decimal_cannot_hold():
@@ -87,16 +87,16 @@ def test_precision_survives_values_float_and_default_decimal_cannot_hold():
     records += [{'saleDate': dates[0], 'itemName': 'Bread', 'quantity': Decimal('0.0000000000000000000000000000001')}]
     estimate = only(build_analysis(records, AS_OF, START))
     # Default Decimal context (28 digits) and float would both lose these trailing digits.
-    assert Fraction(Decimal(estimate.currentTotal)) == 7 * Fraction(large) + Fraction(1, 10**31)
+    assert Fraction(Decimal(_t(estimate.currentTotal))) == 7 * Fraction(large) + Fraction(1, 10**31)
 
 
 def test_float_artifacts_do_not_appear():
     dates = logged_dates(7)
     records = rows(dates[:1], '0.1') + rows(dates[:1], '0.2') + rows(dates[1:], 1)
     estimate = only(build_analysis(records, AS_OF, START))
-    assert estimate.series[0].quantity == '0.3'
-    assert estimate.currentTotal == '6.3'
-    assert estimate.currentAverage == '0.9'
+    assert _t(estimate.series[0].quantity) == '0.3'
+    assert _t(estimate.currentTotal) == '6.3'
+    assert _t(estimate.currentAverage) == '0.9'
     assert estimate.currentAverageRounded is False
 
 
@@ -106,8 +106,8 @@ def test_float_artifacts_do_not_appear():
 ], ids=['tiny', 'huge'])
 def test_extreme_numeric_values_do_not_fail(quantity, expected_qty):
     estimate = only(build_analysis(rows(logged_dates(7), quantity), AS_OF, START))
-    assert Fraction(Decimal(estimate.currentAverage)) == Fraction(Decimal(quantity))
-    assert Fraction(Decimal(estimate.suggestedQty)) == expected_qty
+    assert Fraction(Decimal(_t(estimate.currentAverage))) == Fraction(Decimal(quantity))
+    assert Fraction(Decimal(_t(estimate.suggestedQty))) == expected_qty
 
 
 def test_decimal_text_keeps_significant_digits_for_tiny_repeating_values():
@@ -121,9 +121,9 @@ def test_decimal_text_keeps_significant_digits_for_tiny_repeating_values():
 def test_labels_normalize_case_and_whitespace_without_merging_synonyms():
     dates = logged_dates(7)
     records = [{'saleDate': day, 'itemName': name, 'quantity': Decimal('1')}
-               for day, name in zip(dates, ['bread', ' BREAD ', 'Bread', 'bread\t', 'BREAD', 'bread', 'Bread '])]
+               for day, name in zip(dates, ['bread', ' BREAD ', 'Bread', 'bread\t', 'BREAD', 'bread', 'Bread '], strict=True)]
     records.append({'saleDate': dates[0], 'itemName': 'Loaf', 'quantity': Decimal('1')})
     estimates = {e.itemKey: e for e in build_analysis(records, AS_OF, START).estimates}
     assert set(estimates) == {'bread', 'loaf'}
     assert estimates['bread'].itemName == 'Bread'  # Most recent spelling, trimmed.
-    assert estimates['bread'].currentTotal == '7'
+    assert _t(estimates['bread'].currentTotal) == '7'

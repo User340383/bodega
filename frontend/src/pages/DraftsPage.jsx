@@ -1,20 +1,45 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { readRecentDrafts } from '../auth/session'
+import { useAuth } from '../auth/useAuth'
+import { STATUS_LABELS } from '../components/draftRules'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const STATUS_LABELS = {
-  NEEDS_VERIFICATION: 'Needs checking', AI_UNAVAILABLE: 'Type the sales', REJECTED: 'Could not read', CONFIRMED: 'Saved',
-}
 const INPUT_LABELS = { IMAGE: 'Photo', TEXT: 'Text', MANUAL: 'Manual' }
 
-// Reopen an unconfirmed draft. Drafts captured in this tab are listed here; any other one opens by its ID.
-// When GET /api/v1/submissions (FR-216) exists, this list should come from it instead.
+// Pending drafts (FR-216, M3 4.3 /drafts): every open submission from GET /api/v1/submissions,
+// loaded from PostgreSQL so drafts reopen across sessions, with Open and Discard. Discarding
+// deletes the draft and its saved photo or text.
 export default function DraftsPage() {
+  const { request } = useAuth()
   const navigate = useNavigate()
-  const [recent] = useState(readRecentDrafts)
+  const [state, setState] = useState({ drafts: [], loading: true, error: '' })
+  const [reload, setReload] = useState(0)
+  const [discarding, setDiscarding] = useState(null)
+  const [notice, setNotice] = useState('')
   const [submissionId, setSubmissionId] = useState('')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    request('/api/v1/submissions').then(drafts => {
+      if (active) setState({ drafts, loading: false, error: '' })
+    }).catch(failure => { if (active) setState({ drafts: [], loading: false, error: failure.message }) })
+    return () => { active = false }
+  }, [request, reload])
+
+  async function discard(draft) {
+    setDiscarding(draft.submissionId)
+    setNotice('')
+    try {
+      await request(`/api/v1/submissions/${encodeURIComponent(draft.submissionId)}`, { method: 'DELETE' })
+      setNotice(`Discarded the draft from ${draft.saleDate}.`)
+      setReload(value => value + 1)
+    } catch (failure) {
+      setNotice(`${failure.message} The draft was kept.`)
+    } finally {
+      setDiscarding(null)
+    }
+  }
 
   function open(event) {
     event.preventDefault()
@@ -24,14 +49,23 @@ export default function DraftsPage() {
   }
 
   return <>
-    <section aria-labelledby="recent-heading">
-      <h1 id="recent-heading">Pending drafts</h1>
-      {recent.length ? <ul className="recent-list">
-        {recent.map(item => <li key={item.submissionId}>
-          <span>{item.saleDate || 'Unknown date'} · {INPUT_LABELS[item.inputType] || 'Capture'} · {STATUS_LABELS[item.status] || item.status}</span>
-          <Link className="button-link" to={`/review/${item.submissionId}`}>Open</Link>
-        </li>)}
-      </ul> : <p>No drafts captured in this browser tab yet. <Link to="/capture">Capture sales</Link>.</p>}
+    <section aria-labelledby="pending-heading">
+      <h1 id="pending-heading">Pending drafts</h1>
+      <p>Drafts are not part of your sales history until you confirm them. Unconfirmed drafts are deleted after 30 days.</p>
+      {notice && <p role="status" className="status-note">{notice}</p>}
+      {state.loading ? <p role="status">Loading drafts…</p> : state.error ? <p role="alert">{state.error}</p> :
+        state.drafts.length ? <ul className="recent-list">
+          {state.drafts.map(draft => <li key={draft.submissionId}>
+            <span>{draft.saleDate} · {INPUT_LABELS[draft.inputType] || 'Capture'} · {STATUS_LABELS[draft.status] || draft.status}
+              {draft.lineCount ? ` · ${draft.lineCount} ${draft.lineCount === 1 ? 'row' : 'rows'}` : ''}</span>
+            <span className="link-row">
+              <Link className="button-link" to={`/review/${draft.submissionId}`}>Open</Link>
+              <button type="button" className="secondary" disabled={discarding === draft.submissionId}
+                aria-label={`Discard draft from ${draft.saleDate}`} onClick={() => discard(draft)}>
+                {discarding === draft.submissionId ? 'Discarding…' : 'Discard'}</button>
+            </span>
+          </li>)}
+        </ul> : <><p>No pending drafts.</p><p><Link className="button-link" to="/capture">Capture sales</Link></p></>}
     </section>
     <section aria-labelledby="open-heading">
       <h2 id="open-heading">Open a submission by ID</h2>

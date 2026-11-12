@@ -10,7 +10,7 @@ const point = (day, quantity, movingAverage = null, extra = {}) => ({
 
 const bread = {
   itemKey: 'bread', itemName: 'Bread', windowLoggedDays: 7,
-  currentAverage: '4', currentAverageRounded: false, currentTotal: '28', currentDaysWithSales: 7,
+  currentAverage: '4', currentAverageRounded: false, currentAverageDisplay: '4.0', currentTotal: '28', currentDaysWithSales: 7,
   previousAverage: '2', previousAverageRounded: false, previousTotal: '14', previousDaysWithSales: 7,
   trend: 'UP', changePercent: '100', suggestedQty: '28',
   series: [point('24', '2'), point('25', '0', null, { observed: false }), point('28', '4', '2.5', { calendarDaysSkipped: 2 }), point('30', '4', '4', { calendarDaysSkipped: 1 })],
@@ -28,7 +28,8 @@ const baseAnalysis = {
 
 const guidanceResult = (overrides = {}) => ({
   asOf: '2026-04-30', status: 'READY', source: 'AI_WORDED', groundingPassed: true, failedRule: null, failureReason: null,
-  providerCalled: true, provider: 'real', stockNotice: 'These are sales-based planning suggestions, not low-stock alerts.',
+  providerCalled: true, provider: 'real', sourceLabel: null,
+  stockNotice: 'These numbers come only from the sales you logged. Check what you already have in stock before you buy.',
   items: [{ itemName: 'Bread', suggestedQty: '28', currentAverage: '4', previousAverage: '2', trend: 'UP', message: 'Bread: plan 28 units.' }],
   ...overrides,
 })
@@ -48,7 +49,7 @@ function router({ analysis = baseAnalysis, guidance = guidanceResult() } = {}) {
 }
 
 const analysisCalls = request => request.mock.calls.filter(([path]) => path.startsWith('/api/v1/analysis'))
-const guidanceButton = () => screen.findByRole('button', { name: 'Get restocking guidance' })
+const guidanceButton = () => screen.findByRole('button', { name: 'Get restocking advice' })
 
 describe('Results dashboard analysis', () => {
   it('shows the effective date, history range, estimates and exact strings', async () => {
@@ -58,9 +59,13 @@ describe('Results dashboard analysis', () => {
     expect(screen.getByText(/from 2026-04-03 to 2026-04-30: 14 logged dates/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Bread' })).toBeInTheDocument()
     const card = screen.getByRole('article', { name: 'Bread' })
-    expect(within(card).getByText('Planning quantity').nextSibling).toHaveTextContent('28')
-    expect(within(card).getByText('Average per logged date').nextSibling).toHaveTextContent('4')
-    expect(within(card).getByText('Previous 7-date average').nextSibling).toHaveTextContent('2')
+    // M3 section 3 / 4.3 labels; the average is shown to 1 decimal.
+    expect(within(card).getByText('Suggested stock for your next 7 selling days').nextSibling).toHaveTextContent('28')
+    expect(within(card).getByText('Average sold per logged day (last 7 logged days)').nextSibling).toHaveTextContent('4.0')
+    expect(within(card).getByText('Previous 7 logged days average').nextSibling).toHaveTextContent('2')
+    // M3 9.7: the stock-check notice appears with the estimates, not only with advice.
+    expect(screen.getByText('Check your stock:').parentElement).toHaveTextContent(
+      'These numbers come only from the sales you logged. Check what you already have in stock before you buy.')
     expect(within(card).getByText(/\+100% against the previous 7 logged dates/)).toBeInTheDocument()
     expect(screen.getByText(/sales-based planning guidance/)).toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
@@ -129,7 +134,10 @@ describe('Results dashboard analysis', () => {
     render(<ResultsDashboard request={request} revision={0} />)
     expect(await screen.findByText('No confirmed sales exist in this 28-day period.')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
-    expect(screen.queryByText('Planning quantity')).not.toBeInTheDocument()
+    expect(screen.queryByText('Suggested stock for your next 7 selling days')).not.toBeInTheDocument()
+    // FR-602: a path to the input form, and no fabricated values.
+    expect(screen.getByRole('link', { name: 'Capture sales' })).toHaveAttribute('href', '/capture')
+    expect(screen.queryByText('Check your stock:')).not.toBeInTheDocument()
     expect(await guidanceButton()).toBeDisabled()
   })
 
@@ -142,7 +150,8 @@ describe('Results dashboard analysis', () => {
     render(<ResultsDashboard request={request} revision={0} />)
     expect(await screen.findByText(/4 more needed/)).toBeInTheDocument()
     expect(screen.getByText('INSUFFICIENT DATA')).toBeInTheDocument()
-    expect(screen.queryByText('Planning quantity')).not.toBeInTheDocument()
+    expect(screen.queryByText('Suggested stock for your next 7 selling days')).not.toBeInTheDocument()
+    expect(screen.getByText(/Log at least 7 days of sales to see estimates \(3 of 7 so far\)\./)).toBeInTheDocument()
     expect(screen.queryByTestId('average-line')).not.toBeInTheDocument()
     expect(screen.queryByText('Average of the latest 7 logged dates')).not.toBeInTheDocument()
     expect(within(screen.getByRole('img')).getAllByTestId('sales-bar')).toHaveLength(3)
@@ -156,7 +165,7 @@ describe('Results dashboard analysis', () => {
     render(<ResultsDashboard request={router({ analysis })} revision={0} />)
     expect(await screen.findByText('INSUFFICIENT DATA')).toBeInTheDocument()
     expect(screen.getByText(/Needs 14 logged dates/)).toBeInTheDocument()
-    expect(screen.getByText('Previous 7-date average').nextSibling).toHaveTextContent('—')
+    expect(screen.getByText('Previous 7 logged days average').nextSibling).toHaveTextContent('—')
     expect(await guidanceButton()).toBeEnabled()
   })
 
@@ -165,7 +174,7 @@ describe('Results dashboard analysis', () => {
     const user = userEvent.setup()
     render(<ResultsDashboard request={request} revision={0} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Sales could not be loaded')
-    expect(screen.queryByRole('button', { name: 'Get restocking guidance' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Get restocking advice' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Refresh analysis' }))
     expect(await screen.findByRole('heading', { name: 'Bread' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -215,7 +224,9 @@ describe('Results dashboard guidance', () => {
     expect(await screen.findByText('Bread: plan 28 units.')).toBeInTheDocument()
     expect(request).toHaveBeenCalledWith('/api/v1/guidance', { method: 'POST', body: JSON.stringify({ asOf: '2026-04-30' }) })
     expect(screen.getByText(/AI-worded and checked against backend figures/)).toBeInTheDocument()
-    expect(screen.getByText('Check your stock:').parentElement).toHaveTextContent('not low-stock alerts.')
+    const notices = screen.getAllByText('Check your stock:')
+    expect(notices).toHaveLength(2)  // With the estimates and with the advice (M3 9.7).
+    expect(notices[1].parentElement).toHaveTextContent('Check what you already have in stock before you buy.')
     expect(screen.getByText(/Bodega does not record current stock/)).toBeInTheDocument()
   })
 
@@ -231,7 +242,7 @@ describe('Results dashboard guidance', () => {
     const user = userEvent.setup()
     render(<ResultsDashboard request={router({ guidance })} revision={0} />)
     await user.click(await guidanceButton())
-    expect(await screen.findByText(/Template wording from backend figures/)).toBeInTheDocument()
+    expect((await screen.findByText('Source:')).parentElement).toHaveTextContent('Source: Standard advice') // M3 9.7 label.
     expect(screen.getByText(/does not support, so its wording was rejected/)).toBeInTheDocument()
   })
 
@@ -251,8 +262,8 @@ describe('Results dashboard guidance', () => {
     const user = userEvent.setup()
     render(<ResultsDashboard request={request} revision={0} />)
     await user.click(await guidanceButton())
-    expect(screen.getByRole('status')).toHaveTextContent('Getting guidance')
-    expect(screen.getByRole('button', { name: 'Getting guidance…' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Getting advice')
+    expect(screen.getByRole('button', { name: 'Getting advice…' })).toBeDisabled()
     pending.reject(new Error('Unauthorized'))
     expect(await screen.findByRole('alert')).toHaveTextContent('Unauthorized')
     expect(await guidanceButton()).toBeEnabled()
@@ -295,11 +306,11 @@ describe('Results dashboard guidance', () => {
     const { rerender } = render(<ResultsDashboard request={request} revision={0} />)
     await user.click(await guidanceButton())
     rerender(<ResultsDashboard request={request} revision={1} />)
-    await screen.findByRole('button', { name: 'Get restocking guidance' })
+    await screen.findByRole('button', { name: 'Get restocking advice' })
     pending.resolve(guidanceResult({ items: [{ ...guidanceResult().items[0], message: 'Stale advice' }] }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(screen.queryByText('Stale advice')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Get restocking guidance' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Get restocking advice' })).toBeEnabled()
   })
 
   it('ignores an older guidance response after a newer request', async () => {
@@ -337,5 +348,14 @@ describe('Chart value conversion', () => {
     expect(axisMaximum(28)).toBe(50)
     expect(axisMaximum(100)).toBe(100)
     expect(axisMaximum(1.7e308)).toBeNull()
+  })
+})
+
+describe('Results dashboard advice length (NFR-734)', () => {
+  it('says when advice covers only some items', async () => {
+    const user = userEvent.setup()
+    render(<ResultsDashboard request={router({ guidance: guidanceResult({ omittedItems: 3 }) })} revision={0} />)
+    await user.click(await guidanceButton())
+    expect(await screen.findByText(/Advice covers the 1 items with the highest suggested stock/)).toBeInTheDocument()
   })
 })

@@ -36,7 +36,7 @@ DOWN    when current × 10 < previous × 9
 
 **Worked example.** 14 consecutive logged dates; bread sells 2 on each of the first seven and 4 on each of the latest seven. Prior average 2, current average 4, trend `UP`, suggested quantity 28.
 
-**Default date.** Without `asOf`, the analysis uses "today" from an injectable clock (`app/clock.py`) in `APP_TIMEZONE`, defaulting to UTC when unset. A malformed date or a date in the future returns 422 from both endpoints. An invalid timezone setting returns 503.
+**Default date.** Without `asOf`, the analysis uses "today" from an injectable clock (`app/clock.py`) in `APP_TIMEZONE`, defaulting to UTC when unset. A malformed date or a date in the future returns 400 from both endpoints (M3 4.2). An invalid timezone setting returns 503.
 
 ## 2. How exactness is preserved
 
@@ -249,3 +249,22 @@ These commands ran on Windows on 2026-11-04 with Python 3.12, pandas 3.1.1, Node
 - **José:** implement the extraction adapter and replace the test-only `MockVisionModel` wiring. Reuse `WordingProvider` if a shared provider abstraction appears.
 - **Luis:** when the shared shell or client arrives, keep passing `request` and `revision` to the dashboard. Choose the production provider and configuration with the team. Add `compose.test.yml` coverage for the new checks if wanted; it needs no new service.
 - **Not implemented:** real AI provider, snapshot persistence, and any stock or inventory tracking.
+
+## 12. Integration update (`integration/m3-completion`)
+
+- **M3 9.6/9.7 wording.** The exact template and trend phrases, the "Standard advice" label (`sourceLabel`) and the exact stock-check notice. The dashboard uses the M3 labels and shows the average to one decimal (`currentAverageDisplay`); exact values remain.
+- **Grounding** also applies the M3 rules: 1-decimal average, 40 words, the listed trend words. A test proves the template passes the check by construction.
+- **`ClaudeLLMService`** is implemented: strict tool, `tool_choice` auto, no retries, 15 s timeout. It is tested only with a fake client; real wording is unverified.
+- **Snapshots.** `/analysis` and `/guidance` save SD-03 snapshots and never read them back (D-10).
+- **Insufficient history** in guidance is now 409 INSUFFICIENT_HISTORY (M3 4.2).
+- **Exactness tests** use the final limits (99,999.99); arbitrary-precision math stays covered in `test_analysis_math.py`.
+- **NFR-703 measured:** p95 0.159 s at 5,000 records (`test_performance.py`).
+
+## 13. Milestone 4 review update (2026-11-10)
+
+Reviewed against `WorkDivision.docx` and the final Milestone 3; the full mapping is in `docs/TRACEABILITY.md`.
+
+- **Your analysis, guidance and dashboard are unchanged from this report.** For one day the working tree used the Milestone 2 all-history formula without trends (D-26); that was withdrawn because WorkDivision assigns 7-day moving averages, trend classification and trend directions on the dashboard. The files are identical to the committed versions except for the points below.
+- **Changes in your files, for your review:** an invalid `asOf` answers 400 directly (M3 4.2). `ClaudeLLMService` requires exactly one schema-valid `write_guidance` call, uses `max_tokens` 1024 and a 15-second per-call timeout (D-35). New regression tests in `tests/test_integration_regressions.py` pin the 7-logged-day average, the trend, the suggested stock, the snapshot shape and the 409.
+- **Known limit:** a suggested stock above 2,147,483,647 cannot be saved in the snapshot column; the confirmed-row limits make that unreachable.
+- Real Claude wording still needs an authorized `AI_API_KEY`.
