@@ -90,6 +90,13 @@ jobs:
       - name: Ruff
         run: pipx run ruff==0.17.4 check backend
 
+      # Backend type check (Pyright, basic mode; rules in backend/pyrightconfig.json). Runs in the
+      # backend test image so imports resolve against the pinned requirements.
+      - name: Pyright
+        run: >
+          docker compose -f compose.test.yml run --build --rm --no-deps -v "$PWD/backend:/src:ro" -w /src
+          backend-tests sh -c "pip install --quiet --disable-pip-version-check --root-user-action=ignore 'pyright[nodejs]==1.1.414' && pyright"
+
       # M1/M2/M3: the Mermaid sources in docs/ are living artifacts; every one must render.
       - name: Mermaid diagrams render
         run: |

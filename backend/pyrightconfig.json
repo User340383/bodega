@@ -1,0 +1,12 @@
+{
+  "include": ["app", "alembic", "benchmarks"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportAttributeAccessIssue": "none",
+  "reportArgumentType": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalOperand": "none",
+  "reportOptionalIterable": "none",
+  "reportCallIssue": "none",
+  "reportFunctionMemberAccess": "none"
+}
