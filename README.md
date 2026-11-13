@@ -1,6 +1,10 @@
 # Bodega
 
-A web app for small shops to capture sales from a photo or text, confirm them, and get restocking estimates. Built for COMP 425, Team Bodega. Each member's report lists the details of their part:
+A web app for small shops to capture sales from a photo or text, confirm them, and get restocking estimates. Built for COMP 425, Team Bodega.
+
+## Team
+
+Each member's report lists the details of their part:
 
 - [Luis Heyaime](docs/LUIS_IMPLEMENTATION.md): application shell, Docker, CI/CD, Render deployment
 - [José Javier Otazu](docs/JOSE_IMPLEMENTATION.md): AI ingestion and capture
@@ -42,9 +46,95 @@ docker compose exec -T postgres psql -U bodega -d bodega -v ON_ERROR_STOP=1 < ba
 
 `AI_PROVIDER=mock` needs no paid key. Mock wording demonstrates the integration only, not real-provider quality.
 
-## Isolated tests
+## Project structure
 
-This uses a separate Compose project, an unexposed PostgreSQL test service backed by tmpfs, and a unique schema per backend test. It does not use application database volumes.
+```text
+bodega/
+├── backend/                  FastAPI API (Python 3.12)
+│   ├── app/                  routes (main.py), ingestion, privacy, analysis, guidance, repository, storage
+│   ├── alembic/              Alembic revisions; they apply the reviewed SQL files in migrations/
+│   ├── migrations/           SQL schema migrations
+│   ├── seeds/                synthetic SQL seed data
+│   ├── tests/                pytest suites and the HTTP smoke test (smoke_http.py)
+│   ├── benchmarks/           extraction benchmark harness
+│   ├── ruff.toml             Python lint rules
+│   ├── pyrightconfig.json    Python type-check rules
+│   └── Dockerfile
+├── frontend/                 React + Vite single-page app, styled with Tailwind CSS
+│   ├── src/pages/            one component per route (/login, /capture, /review, /drafts, /history, /analysis)
+│   ├── src/components/       capture, draft review, manual entry, history, results dashboard, delete-all
+│   ├── src/auth/, src/api/, src/layout/   access-code session, API client, application shell
+│   ├── eslint.config.js      JavaScript lint rules
+│   └── Dockerfile            dev server for Compose; nginx image for production
+├── docs/                     team reports, SRS, traceability, privacy, architecture diagrams, manual tests
+├── scripts/                  test-all.ps1 (all tests), production-topology and requirement measurement scripts
+├── .github/workflows/ci.yml  CI: tests, lint, type check, smoke test, image builds, Render deploy
+├── docker-compose.yml        local application: PostgreSQL, MinIO, backend, frontend
+├── compose.test.yml          isolated test stack (temporary PostgreSQL and MinIO)
+├── compose.prodcheck.yml     production-topology checks
+└── render.yaml               Render deployment blueprint
+```
+
+## Running the tests
+
+### One command for all tests
+
+From the repository root, with Docker Desktop running:
+
+```powershell
+.\scripts\test-all.ps1
+```
+
+This is the command that runs the complete automated suite. It runs the same checks as CI, in this order, and stops with a non-zero exit code at the first failure:
+
+1. Backend tests: pytest against a temporary PostgreSQL database.
+2. Alembic `upgrade head` on a clean database.
+3. Backend lint and type check: Ruff and Pyright.
+4. Frontend checks: ESLint, Vitest and the Vite production build.
+5. The HTTP smoke test, run against the full test stack.
+
+It prints a pass/fail summary of each step at the end. It needs no API keys and contacts no production service. It runs in the separate `bodega-gabriel-test` Compose project with in-memory databases, and the cleanup at the end removes only that project's containers. Your local application's data is not touched.
+
+- **Scripts blocked:** if Windows blocks local scripts, run `powershell -ExecutionPolicy Bypass -File .\scripts\test-all.ps1`.
+- **macOS or Linux:** use PowerShell 7: `pwsh ./scripts/test-all.ps1`.
+
+CI also runs a secret scan, the Mermaid diagram render and the production image builds, which `test-all.ps1` leaves out.
+
+### Lint and type checking
+
+| Tool | Checks | Configuration | Run by |
+| --- | --- | --- | --- |
+| ESLint | Frontend JavaScript/JSX | `frontend/eslint.config.js` | `npm run lint`, `frontend-checks`, CI |
+| Ruff 0.17.4 | Backend Python lint | `backend/ruff.toml` | CI "Lint and Secret Scan", `test-all.ps1` |
+| Pyright 1.1.414 | Backend Python types (basic mode) | `backend/pyrightconfig.json` | CI "Lint and Secret Scan", `test-all.ps1` |
+
+Pyright checks `app/`, `alembic/` and `benchmarks/` against the pinned requirements. It catches errors such as wrong return types, undefined names and unbound variables.
+- **Seven rules are switched off** in `pyrightconfig.json`:
+  - `reportAttributeAccessIssue`
+  - `reportArgumentType`
+  - `reportOptionalMemberAccess`
+  - `reportOptionalOperand`
+  - `reportOptionalIterable`
+  - `reportCallIssue`
+  - `reportFunctionMemberAccess`
+- **Why:** with them on, the existing code has 95 findings on 44 lines. Most come from pandas and Anthropic SDK type stubs.
+- **To tighten later:** turn a rule back on once its findings are fixed.
+
+The frontend is plain JavaScript with no TypeScript, so its type-level checking comes from ESLint and the production build.
+
+### Manual test checklist
+
+[docs/manual-tests.md](docs/manual-tests.md) has seven end-to-end browser scenarios with steps, expected and actual results, and a pass/fail record:
+- sign-in
+- text and photo capture
+- review and confirm
+- manual entry and the AI outage
+- the results dashboard
+- deleting all data
+
+### Individual steps
+
+The isolated test stack uses a separate Compose project, an unexposed PostgreSQL test service backed by tmpfs, and a unique schema per backend test. It does not use application database volumes. To run its parts one at a time:
 
 ```sh
 docker compose -f compose.test.yml build
