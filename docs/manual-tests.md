@@ -13,7 +13,7 @@ Seven end-to-end scenarios that a person can run in a browser to check Bodega's 
 
 ## Summary
 
-| ID | Scenario | Result on 2026-11-12 |
+| ID | Scenario | Result (both recorded runs) |
 | --- | --- | --- |
 | [MT-01](#mt-01-sign-in-and-reject-an-invalid-access-code) | Sign in, reject an invalid access code, sign out | Pass |
 | [MT-02](#mt-02-capture-sales-from-text) | Capture sales from text | Pass |
@@ -23,11 +23,12 @@ Seven end-to-end scenarios that a person can run in a browser to check Bodega's 
 | [MT-06](#mt-06-results-dashboard-and-restocking-advice) | Results dashboard and restocking advice | Pass |
 | [MT-07](#mt-07-delete-all-my-sales-data) | Delete all my sales data | Pass |
 
-**About the recorded run.** It used branch `chore/m4-submission-requirements`, based on `main` at `749fc71`, in Chrome at 1280×900.
-- **Not the Docker stack:** Docker Desktop could not start on the test machine, so the app ran natively. That means uvicorn and the Vite dev server, PostgreSQL 16, and the `moto` S3 emulator in place of MinIO. The settings matched `docker-compose.yml`: the same access code, `AI_PROVIDER=mock` and `APP_TIMEZONE=America/Santo_Domingo`.
-- **AI outage step:** the outage part of MT-05 used a second backend with no AI provider.
-- **How it was checked:** each step was driven with Playwright, and each expected result was asserted, not just observed.
-- **Not covered:** real Claude extraction and wording (`AI_PROVIDER=claude` with a key) were not part of this run. Mock output shows that the workflow works, not how well the AI reads.
+**About the recorded runs.** Both used branch `chore/m4-submission-requirements`, based on `main` at `749fc71`, in Chrome at 1280×900. Each step was driven with Playwright, and each expected result was asserted, not just observed.
+- **2026-11-13, Docker Compose stack:** the images and settings from `docker-compose.yml`, with real PostgreSQL and MinIO, `AI_PROVIDER=mock` and access code `local-development-code-123`. MT-05 Part B restarted the backend with `AI_PROVIDER=none`, as described there. One difference: Docker Desktop on the test PC could not read the `D:` drive the repository is on, so the source bind mounts were removed and the code baked into the images ran instead.
+- **2026-11-12, native stack:** Docker Desktop did not start that day. The app ran natively (uvicorn, the Vite dev server, PostgreSQL 16) with the `moto` S3 emulator in place of MinIO, using the same access code, `AI_PROVIDER=mock` and `APP_TIMEZONE=America/Santo_Domingo`. MT-05 Part B used a second backend with no AI provider.
+- **Not covered:** real Claude extraction and wording (`AI_PROVIDER=claude` with a key). Mock output shows that the workflow works, not how well the AI reads.
+
+The "Actual result" sections quote the 2026-11-12 run. The 2026-11-13 Docker run showed the same results, with that day's dates.
 
 To re-run, add a row to the run log at the end of this file.
 
@@ -230,4 +231,4 @@ This creates 14 logged days ending yesterday: Bread rises from 2 to 4 a day, Mil
 | Date | Commit | Environment | Tester | MT-01 | MT-02 | MT-03 | MT-04 | MT-05 | MT-06 | MT-07 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-12 | `749fc71` + this branch | Native stack, `moto` for S3, mock AI, Chrome (scripted) | Claude Code for Diushen Cabrera | Pass | Pass | Pass | Pass | Pass | Pass | Pass |
-| | | Docker Compose stack (`docker compose up`) | | | | | | | | |
+| 2026-11-13 | `f0f22c2` | Docker Compose stack: PostgreSQL, MinIO, mock AI (bind mounts removed), Chrome (scripted) | Claude Code for Diushen Cabrera | Pass | Pass | Pass | Pass | Pass | Pass | Pass |
